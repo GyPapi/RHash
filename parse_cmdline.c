@@ -1,18 +1,6 @@
 /* parse_cmdline.c - parsing of command line options */
 
-#include <assert.h>
-#include <locale.h>
-#include <stdarg.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#ifdef _WIN32
-# include <windows.h> /* for SetFileApisToOEM(), CharToOem() */
-#endif
-
 #include "parse_cmdline.h"
-#include "common_func.h"
-#include "file.h"
 #include "file_mask.h"
 #include "find_file.h"
 #include "hash_print.h"
@@ -20,6 +8,15 @@
 #include "rhash_main.h"
 #include "win_utils.h"
 #include "librhash/rhash.h"
+#include <assert.h>
+#include <locale.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#ifdef _WIN32
+# include <windows.h> /* for CommandLineToArgvW(), GetCommandLineW(), ... */
+#endif
 
 typedef struct options_t options_t;
 struct options_t conf_opt; /* config file parsed options */
@@ -90,7 +87,7 @@ static void print_help(void)
 	print_help_line("      --snefru128, --snefru256  ", hash_sum_format, "SNEFRU-128/256");
 	print_help_line("  -a, --all     ", _("Calculate all supported hashes.\n"));
 	print_help_line("  -c, --check   ", _("Check hash files specified by command line.\n"));
-	print_help_line("  -u, --update  ", _("Update hash files specified by command line.\n"));
+	print_help_line("  -u, --update=<file> ", _("Update the specified hash file.\n"));
 	print_help_line("  -e, --embed-crc  ", _("Rename files by inserting crc32 sum into name.\n"));
 	print_help_line("  -k, --check-embedded  ", _("Verify files by crc32 sum embedded in their names.\n"));
 	print_help_line("      --list-hashes  ", _("List the names of supported hashes, one per line.\n"));
@@ -101,7 +98,7 @@ static void print_help(void)
 	print_help_line("  -m, --message=<text> ", _("Process the text message.\n"));
 	print_help_line("      --skip-ok ", _("Don't print OK messages for successfully verified files.\n"));
 	print_help_line("  -i, --ignore-case  ", _("Ignore case of filenames when updating hash files.\n"));
-	print_help_line("      --percents   ", _("Show percents, while calculating or checking hashes.\n"));
+	print_help_line("  -P, --percents   ", _("Show percents, while calculating or checking hashes.\n"));
 	print_help_line("      --speed   ", _("Output per-file and total processing speed.\n"));
 	print_help_line("      --maxdepth=<n> ", _("Descend at most <n> levels of directories.\n"));
 	if (rhash_is_openssl_supported())
@@ -178,12 +175,12 @@ static void add_file_suffix(options_t *o, char* accept_string, unsigned type)
 }
 
 /**
-* Process --bt_announce option.
-*
-* @param o pointer to the options structure
-* @param announce_url the url to parse
-* @param unused a tottaly unused parameter
-*/
+ * Process --bt_announce option.
+ *
+ * @param o pointer to the options structure
+ * @param announce_url the url to parse
+ * @param unused a tottaly unused parameter
+ */
 static void bt_announce(options_t *o, char* announce_url, unsigned unused)
 {
 	(void)unused;
@@ -351,7 +348,7 @@ cmdline_opt_t cmdline_opt[] =
 	/* program modes */
 	{ F_UFLG, 'c',   0, "check",  &opt.mode, MODE_CHECK },
 	{ F_UFLG, 'k',   0, "check-embedded",  &opt.mode, MODE_CHECK_EMBEDDED },
-	{ F_UFLG, 'u',   0, "update", &opt.mode, MODE_UPDATE },
+	{ F_TSTR, 'u',   0, "update", &opt.update_file, 0 },
 	{ F_UFLG, 'B',   0, "benchmark", &opt.mode, MODE_BENCHMARK },
 	{ F_UFLG,   0,   0, "torrent", &opt.mode, MODE_TORRENT },
 	{ F_VFNC,   0,   0, "list-hashes", list_hashes, 0 },
@@ -413,7 +410,7 @@ cmdline_opt_t cmdline_opt[] =
 	{ F_UFLG,   0,   0, "gost-reverse", &opt.flags, OPT_GOST_REVERSE },
 	{ F_UFLG,   0,   0, "skip-ok", &opt.flags, OPT_SKIP_OK },
 	{ F_UFLG, 'i',   0, "ignore-case", &opt.flags, OPT_IGNORE_CASE },
-	{ F_UENC,   0,   0, "percents", &opt.flags, OPT_PERCENTS },
+	{ F_UENC, 'P',   0, "percents", &opt.flags, OPT_PERCENTS },
 	{ F_UFLG,   0,   0, "speed",  &opt.flags, OPT_SPEED },
 	{ F_UFLG, 'e',   0, "embed-crc",  &opt.flags, OPT_EMBED_CRC },
 	{ F_CSTR,   0,   0, "embed-crc-delimiter", &opt.embed_crc_delimiter, 0 },
@@ -613,7 +610,7 @@ static const char* find_conf_file(void)
 		}
 		free(path);
 	}
-	
+
 	/* check for ${PROGRAM_DIR}\rhashrc */
 	if (rhash_data.program_dir && (dir1 = w2c(rhash_data.program_dir))) {
 		path = make_path(dir1, CONFIG_FILENAME);
@@ -915,8 +912,13 @@ static void apply_cmdline_options(struct parsed_cmd_line_t *cmd_line)
 		if (!opt.sum_flags) opt.sum_flags = conf_opt.sum_flags;
 	}
 
-	if (!opt.mode)
+	if (!opt.mode && !opt.update_file) {
 		opt.mode = conf_opt.mode;
+		opt.update_file = conf_opt.update_file;
+	}
+	if (opt.update_file)
+		opt.mode |= MODE_UPDATE;
+
 	if (!(opt.flags & OPT_FMT_MODIFIERS))
 		opt.flags |= conf_opt.flags & OPT_FMT_MODIFIERS;
 	opt.flags |= conf_opt.flags & ~OPT_FMT_MODIFIERS; /* copy the rest of options */

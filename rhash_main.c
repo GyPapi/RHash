@@ -5,24 +5,21 @@
  * ED2K, GOST and many other.
  */
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h> /* free() */
-#include <signal.h>
-#include <locale.h>
-#include <assert.h>
-
 #include "rhash_main.h"
 #include "calc_sums.h"
-#include "common_func.h"
 #include "file_mask.h"
 #include "find_file.h"
 #include "hash_print.h"
 #include "hash_update.h"
-#include "parse_cmdline.h"
 #include "output.h"
+#include "parse_cmdline.h"
 #include "win_utils.h"
 #include "librhash/rhash.h"
+#include <assert.h>
+#include <locale.h>
+#include <signal.h>
+#include <stdlib.h> /* free() */
+#include <string.h>
 
 
 struct rhash_t rhash_data;
@@ -41,7 +38,8 @@ static int must_skip_file(file_t* file)
 
 	/* check if the file path is the same as the output or the log file path */
 	return (opt.output && are_paths_equal(path, opt.output)) ||
-		(opt.log && are_paths_equal(path, opt.log));
+		(opt.log && are_paths_equal(path, opt.log)) ||
+		(opt.update_file && are_paths_equal(path, opt.update_file));
 }
 
 /**
@@ -57,20 +55,21 @@ static int scan_files_callback(file_t* file, int preprocess)
 	assert(!FILE_ISDIR(file));
 	assert(opt.search_data);
 
-	if (rhash_data.interrupted) {
+	if (rhash_data.stop_flags) {
 		opt.search_data->options |= FIND_CANCEL;
 		return 0;
 	}
 
 	if (preprocess) {
-		if (FILE_ISDATA(file) || !file_mask_match(opt.files_accept, file->path) ||
-			(opt.files_exclude && file_mask_match(opt.files_exclude, file->path)) ||
-			must_skip_file(file)) {
+		if (FILE_ISDATA(file) ||
+				!file_mask_match(opt.files_accept, file->path) ||
+				(opt.files_exclude && file_mask_match(opt.files_exclude, file->path)) ||
+				must_skip_file(file))
 			return 0;
-		}
 
-		if (opt.fmt & FMT_SFV) {
-			print_sfv_header_line(rhash_data.out, file, 0);
+		if ((opt.fmt & FMT_SFV) && print_sfv_header_line(rhash_data.out, file, 0) < 0) {
+			log_file_t_error(&rhash_data.out_file);
+			res = -2;
 		}
 
 		rhash_data.batch_size += file->size;
@@ -79,7 +78,7 @@ static int scan_files_callback(file_t* file, int preprocess)
 
 		if (!FILE_ISSPECIAL(file)) {
 			if (not_root) {
-				if ((opt.mode & (MODE_CHECK | MODE_UPDATE)) != 0) {
+				if ((opt.mode & MODE_CHECK) != 0) {
 					/* check and update modes use the crc_accept list */
 					if (!file_mask_match(opt.crc_accept, file->path)) {
 						return 0;
@@ -101,20 +100,26 @@ static int scan_files_callback(file_t* file, int preprocess)
 		if (opt.mode & (MODE_CHECK | MODE_CHECK_EMBEDDED)) {
 			res = check_hash_file(file, not_root);
 		} else if (opt.mode & MODE_UPDATE) {
-			res = update_hash_file(file);
+			res = update_ctx_update(rhash_data.update_context, file);
 		} else {
 			/* default mode: calculate hash */
 			const char* print_path = file->path;
 			if (print_path[0] == '.' && IS_PATH_SEPARATOR(print_path[1]))
 				print_path += 2;
-			res = calculate_and_print_sums(rhash_data.out, file, print_path);
-			if (rhash_data.interrupted)
+			res = calculate_and_print_sums(rhash_data.out, &rhash_data.out_file, file, print_path);
+			if (rhash_data.stop_flags) {
+				opt.search_data->options |= FIND_CANCEL;
 				return 0;
+			}
 			rhash_data.processed++;
 		}
 	}
-	if (res < 0)
-		rhash_data.error_flag = 1;
+	if (res < -1) {
+		rhash_data.stop_flags |= FatalErrorFlag;
+		opt.search_data->options |= FIND_CANCEL;
+		return 0;
+	} else if (res < 0)
+		rhash_data.non_fatal_error = 1;
 	return 1;
 }
 
@@ -130,7 +135,7 @@ void (*prev_sigint_handler)(int) = NULL;
 static void ctrl_c_handler(int signum)
 {
 	(void)signum;
-	rhash_data.interrupted = 1;
+	rhash_data.stop_flags |= InterruptedFlag;
 	if (rhash_data.rctx) {
 		rhash_cancel(rhash_data.rctx);
 	}
@@ -191,9 +196,12 @@ void rhash_destroy(struct rhash_t* ptr)
 {
 	free_print_list(ptr->print_list);
 	rsh_str_free(ptr->template_text);
+	if (ptr->update_context) update_ctx_free(ptr->update_context);
 	if (ptr->rctx) rhash_free(ptr->rctx);
 	if (ptr->out) fclose(ptr->out);
 	if (ptr->log) fclose(ptr->log);
+	file_cleanup(&ptr->out_file);
+	file_cleanup(&ptr->log_file);
 #ifdef _WIN32
 	if (ptr->program_dir) free(ptr->program_dir);
 #endif
@@ -252,7 +260,7 @@ int main(int argc, char *argv[])
 			rsh_fprintf(rhash_data.out, _("%s v%s benchmarking...\n"), PROGRAM_NAME, get_version_string());
 		}
 		run_benchmark(opt.sum_flags, flags);
-		exit_code = (rhash_data.interrupted ? 3 : 0);
+		exit_code = (rhash_data.stop_flags ? 3 : 0);
 		rsh_exit(exit_code);
 	}
 
@@ -267,6 +275,15 @@ int main(int argc, char *argv[])
 		rsh_exit(0);
 	}
 	assert(opt.search_data != 0);
+
+	if (opt.update_file)
+	{
+		file_t upd_path;
+		file_tinit(&upd_path, opt.update_file, FILE_OPT_DONT_FREE_PATH);
+		rhash_data.update_context = update_ctx_new(&upd_path);
+		if (!rhash_data.update_context)
+			rsh_exit(0);
+	}
 
 	/* setup printf formatting string */
 	rhash_data.printf_str = opt.printf_str;
@@ -293,8 +310,10 @@ int main(int argc, char *argv[])
 	opt.search_data->options |= (opt.flags & OPT_FOLLOW ? FIND_FOLLOW_SYMLINKS : 0);
 	opt.search_data->callback = scan_files_callback;
 
-	if ((sfv = (opt.fmt == FMT_SFV && !opt.mode))) {
-		print_sfv_banner(rhash_data.out);
+	sfv = (opt.fmt == FMT_SFV && !opt.mode);
+	if (sfv && print_sfv_banner(rhash_data.out) < 0) {
+		log_file_t_error(&rhash_data.out_file);
+		rhash_data.stop_flags |= FatalErrorFlag;
 	}
 
 	/* preprocess files */
@@ -303,8 +322,13 @@ int main(int argc, char *argv[])
 		opt.search_data->callback_data = 1;
 		scan_files(opt.search_data);
 
-		fflush(rhash_data.out);
+		if (fflush(rhash_data.out) < 0) {
+			log_file_t_error(&rhash_data.out_file);
+			rhash_data.stop_flags |= FatalErrorFlag;
+		}
 	}
+	if ((rhash_data.stop_flags & FatalErrorFlag) != 0)
+		rsh_exit(2);
 
 	/* measure total processing time */
 	rsh_timer_start(&timer);
@@ -316,33 +340,39 @@ int main(int argc, char *argv[])
 	scan_files(opt.search_data);
 
 	if ((opt.mode & MODE_CHECK_EMBEDDED) && rhash_data.processed > 1) {
-		print_check_stats();
+		if (print_check_stats() < 0) {
+			log_file_t_error(&rhash_data.out_file);
+			rhash_data.stop_flags |= FatalErrorFlag;
+		}
+	} else if ((opt.mode & MODE_UPDATE) != 0 && rhash_data.update_context) {
+		/* finalize hash file and check for errors */
+		if (update_ctx_free(rhash_data.update_context) < 0)
+				rhash_data.stop_flags |= FatalErrorFlag;
+		rhash_data.update_context = 0;
 	}
 
-	if (!rhash_data.interrupted) {
+	if (!rhash_data.stop_flags) {
 		if (opt.bt_batch_file && rhash_data.rctx) {
 			file_t batch_torrent_file;
 			file_tinit(&batch_torrent_file, opt.bt_batch_file, FILE_OPT_DONT_FREE_PATH);
 
 			rhash_final(rhash_data.rctx, 0);
-			save_torrent_to(&batch_torrent_file, rhash_data.rctx);
+			if (save_torrent_to(&batch_torrent_file, rhash_data.rctx) < 0)
+				rhash_data.stop_flags |= FatalErrorFlag;
+			file_cleanup(&batch_torrent_file);
 		}
 
-		if ((opt.flags & OPT_SPEED) &&
-			!(opt.mode & (MODE_CHECK | MODE_UPDATE)) &&
-			rhash_data.processed > 1)
-		{
+		if ((opt.flags & OPT_SPEED) && !(opt.mode & (MODE_CHECK | MODE_UPDATE)) &&
+				rhash_data.processed > 1) {
 			double time = rsh_timer_stop(&timer);
 			print_time_stats(time, rhash_data.total_size, 1);
 		}
-	} else {
-		/* check if interruption was not reported yet */
-		if (rhash_data.interrupted == 1) report_interrupted();
-	}
+	} else
+		report_interrupted();
 
-	exit_code = (rhash_data.error_flag ? 1 :
-		opt.search_data->errors_count ? 2 :
-		rhash_data.interrupted ? 3 : 0);
+	exit_code = ((rhash_data.stop_flags & FatalErrorFlag) ? 2 :
+		(rhash_data.non_fatal_error || opt.search_data->errors_count) ? 1 :
+		(rhash_data.stop_flags & InterruptedFlag) ? 3 : 0);
 	rsh_exit(exit_code);
 	return 0; /* unreachable statement */
 }

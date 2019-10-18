@@ -1,7 +1,7 @@
 /* win_utils.c - utility functions for Windows and CygWin */
 #if defined(_WIN32) || defined(__CYGWIN__)
-#include <windows.h>
 #include "win_utils.h"
+#include <windows.h>
 
 /**
  * Set process priority and affinity to use any CPU but the first one,
@@ -26,16 +26,14 @@ void set_benchmark_cpu_affinity(void)
 #ifdef _WIN32
 /* Windows-only (non-CygWin) functions */
 
+#include "parse_cmdline.h"
+#include "rhash_main.h"
 #include <share.h> /* for _SH_DENYWR */
 #include <fcntl.h> /* for _O_RDONLY, _O_BINARY */
 #include <io.h> /* for isatty */
 #include <assert.h>
 #include <errno.h>
 #include <locale.h>
-
-#include "file.h"
-#include "parse_cmdline.h"
-#include "rhash_main.h"
 
 /**
  * Convert a c-string to wide character string using given codepage
@@ -434,22 +432,22 @@ void setup_locale_dir(void)
 	char *locale_dir;
 	DWORD buf_size;
 	DWORD res;
-	
+
 	if (!rhash_data.program_dir) return;
 	buf_size = GetShortPathNameW(rhash_data.program_dir, NULL, 0);
 	if (!buf_size) return;
-	
+
 	short_dir = (wchar_t*)rsh_malloc(sizeof(wchar_t) * buf_size);
 	res = GetShortPathNameW(rhash_data.program_dir, short_dir, buf_size);
 	if (res > 0 && res < buf_size)
 		program_dir = w2c(short_dir);
 	free(short_dir);
 	if (!program_dir) return;
-	
+
 	locale_dir = make_path(program_dir, "locale");
 	free(program_dir);
 	if (!locale_dir) return;
-	
+
 	if (is_directory(locale_dir))
 		bindtextdomain(TEXT_DOMAIN, locale_dir);
 	free(locale_dir);

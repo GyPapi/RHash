@@ -19,7 +19,7 @@ struct percents_output_info_t
 {
 	int  (*init)(struct file_info *info);
 	void (*update)(struct file_info *info, uint64_t offset);
-	void (*finish)(struct file_info *info, int process_res);
+	int  (*finish)(struct file_info *info, int process_res);
 	const char* name;
 };
 
@@ -40,7 +40,7 @@ void log_warning(const char* format, ...);
 void log_file_t_error(struct file_t* file);
 void log_file_t_msg(const char* format, struct file_t* file);
 void report_interrupted(void);
-void print_check_stats(void);
+int print_check_stats(void);
 
 void print_time_stats(double time, uint64_t size, int total);
 void print_file_time_stats(struct file_info* info);

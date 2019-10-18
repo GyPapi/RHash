@@ -1,16 +1,14 @@
 /* find_file.c - functions for recursive scan of directories. */
 
+#include "find_file.h"
+#include "output.h"
+#include "platform.h"
+#include "win_utils.h"
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "platform.h"
-#include "find_file.h"
-#include "common_func.h"
-#include "output.h"
-#include "win_utils.h"
 
 #ifdef _WIN32
 # include <windows.h>
@@ -70,7 +68,7 @@ void file_search_add_file(file_search_data* data, tstr_t path, unsigned file_mod
 	wchar_t* p;
 #endif
 	file_t file;
-	
+
 	file_mode &= (FILE_IFLIST | FILE_IFDATA);
 	assert((file_mode & (file_mode - 1)) == 0);
 	if ((file_mode & FILE_IFDATA) != 0)
@@ -99,7 +97,7 @@ void file_search_add_file(file_search_data* data, tstr_t path, unsigned file_mod
 		wchar_t* parent;
 		WIN32_FIND_DATAW d;
 		HANDLE handle;
-		
+
 		/* Expand the wildcard, found in the provided file path, and store the results into
 		 * data->root_files. If the wildcard is not found then error is reported.
 		 * NB, only wildcards in the basename (the last filename) of the path are expanded. */
