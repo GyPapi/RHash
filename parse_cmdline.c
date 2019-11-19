@@ -151,7 +151,7 @@ enum file_suffix_type {
  * @param path the path of the file
  * @param type the type of the option
  */
-static void add_special_file(options_t *o, tstr_t path, unsigned file_mode)
+static void add_special_file(options_t* o, tstr_t path, unsigned file_mode)
 {
 	if (o->search_data) {
 		file_search_add_file(o->search_data, path, file_mode);
@@ -166,7 +166,7 @@ static void add_special_file(options_t *o, tstr_t path, unsigned file_mode)
  * @param accept_string comma delimited string to parse
  * @param type the type of the option
  */
-static void add_file_suffix(options_t *o, char* accept_string, unsigned type)
+static void add_file_suffix(options_t* o, char* accept_string, unsigned type)
 {
 	file_mask_array** ptr = (type == MASK_ACCEPT ? &o->files_accept :
 		type == MASK_EXCLUDE ? &o->files_exclude : &o->crc_accept);
@@ -181,7 +181,7 @@ static void add_file_suffix(options_t *o, char* accept_string, unsigned type)
  * @param announce_url the url to parse
  * @param unused a tottaly unused parameter
  */
-static void bt_announce(options_t *o, char* announce_url, unsigned unused)
+static void bt_announce(options_t* o, char* announce_url, unsigned unused)
 {
 	(void)unused;
 	/* skip empty string */
@@ -197,18 +197,19 @@ static void bt_announce(options_t *o, char* announce_url, unsigned unused)
  * @param openssl_hashes comma delimited string with hash names
  * @param type ignored
  */
-static void openssl_flags(options_t *o, char* openssl_hashes, unsigned type)
+static void openssl_flags(options_t* o, char* openssl_hashes, unsigned type)
 {
 	(void)type;
 	if (rhash_is_openssl_supported())
 	{
 		rhash_uptr_t openssl_supported_hashes = rhash_get_openssl_supported_mask();
-		char *cur, *next;
+		char* cur;
+		char* next;
 		o->openssl_mask = 0x80000000; /* turn off using default mask */
 
 		/* set the openssl_mask */
 		for (cur = openssl_hashes; cur && *cur; cur = next) {
-			print_hash_info *info = hash_info_table;
+			print_hash_info* info = hash_info_table;
 			unsigned bit;
 			size_t length;
 			next = strchr(cur, ',');
@@ -237,7 +238,7 @@ static void openssl_flags(options_t *o, char* openssl_hashes, unsigned type)
  *
  * @param o pointer to the options structure to update
  */
-static void accept_video(options_t *o)
+static void accept_video(options_t* o)
 {
 	add_file_suffix(o, ".avi,.ogm,.mkv,.mp4,.mpeg,.mpg,.asf,.rm,.wmv,.vob", MASK_ACCEPT);
 }
@@ -260,7 +261,7 @@ static void nya(void)
  * @param number the string containing the max-depth number
  * @param param unused parameter
  */
-static void set_max_depth(options_t *o, char* number, unsigned param)
+static void set_max_depth(options_t* o, char* number, unsigned param)
 {
 	(void)param;
 	if (strspn(number, "0123456789") < strlen(number)) {
@@ -277,7 +278,7 @@ static void set_max_depth(options_t *o, char* number, unsigned param)
  * @param number string containing the piece length number
  * @param param unused parameter
  */
-static void set_bt_piece_length(options_t *o, char* number, unsigned param)
+static void set_bt_piece_length(options_t* o, char* number, unsigned param)
 {
 	(void)param;
 	if (strspn(number, "0123456789") < strlen(number)) {
@@ -294,7 +295,7 @@ static void set_bt_piece_length(options_t *o, char* number, unsigned param)
  * @param sep file separator, can be only '/' or '\'
  * @param param unused parameter
  */
-static void set_path_separator(options_t *o, char* sep, unsigned param)
+static void set_path_separator(options_t* o, char* sep, unsigned param)
 {
 	(void)param;
 	if ((*sep == '/' || *sep == '\\') && sep[1] == 0) {
@@ -306,7 +307,7 @@ static void set_path_separator(options_t *o, char* sep, unsigned param)
 		o->path_separator = '/';
 #endif
 	} else {
-		log_error(_("path-separator is not '/' or '\\': %s\n"), sep);
+		log_error(_("path-separator is neither '/' nor '\\': %s\n"), sep);
 		rsh_exit(2);
 	}
 }
@@ -403,8 +404,8 @@ cmdline_opt_t cmdline_opt[] =
 
 	/* other options */
 	{ F_UFLG, 'r', 'R', "recursive", &opt.flags, OPT_RECURSIVE },
-	{ F_TFNC, 'm',   0, "message", add_special_file, FILE_IFDATA },
-	{ F_TFNC,   0,   0, "file-list", add_special_file, FILE_IFLIST },
+	{ F_TFNC, 'm',   0, "message", add_special_file, FileIsData },
+	{ F_TFNC,   0,   0, "file-list", add_special_file, FileIsList },
 	{ F_UFLG,   0,   0, "follow",  &opt.flags, OPT_FOLLOW },
 	{ F_UFLG, 'v',   0, "verbose", &opt.flags, OPT_VERBOSE },
 	{ F_UFLG,   0,   0, "gost-reverse", &opt.flags, OPT_GOST_REVERSE },
@@ -435,11 +436,11 @@ cmdline_opt_t cmdline_opt[] =
 
 #ifdef _WIN32 /* code pages (windows only) */
 	{ F_UENC,   0,   0, "utf8", &opt.flags, OPT_UTF8 },
-	{ F_UENC,   0,   0, "win",  &opt.flags, OPT_ANSI },
-	{ F_UENC,   0,   0, "dos",  &opt.flags, OPT_OEM },
+	{ F_UENC,   0,   0, "win",  &opt.flags, OPT_ENC_WIN },
+	{ F_UENC,   0,   0, "dos",  &opt.flags, OPT_ENC_DOS },
 	/* legacy: the following two options are left for compatibility */
-	{ F_UENC,   0,   0, "ansi", &opt.flags, OPT_ANSI },
-	{ F_UENC,   0,   0, "oem",  &opt.flags, OPT_OEM },
+	{ F_UENC,   0,   0, "ansi", &opt.flags, OPT_ENC_WIN },
+	{ F_UENC,   0,   0, "oem",  &opt.flags, OPT_ENC_DOS },
 #endif
 	{ 0,0,0,0,0,0 }
 };
@@ -470,7 +471,7 @@ static void fail_on_unknow_option(const char* option_name)
 /* structure to store command line option information */
 typedef struct parsed_option_t
 {
-	cmdline_opt_t *o;
+	cmdline_opt_t* o;
 	const char* name; /* the parsed option name */
 	char buf[4];
 	void* parameter;  /* option argument, if required */
@@ -482,7 +483,7 @@ typedef struct parsed_option_t
  * @param opts the structure to store results of option processing
  * @param option option to process
  */
-static void apply_option(options_t *opts, parsed_option_t* option)
+static void apply_option(options_t* opts, parsed_option_t* option)
 {
 	cmdline_opt_t* o = option->o;
 	unsigned short option_type = o->type;
@@ -502,10 +503,10 @@ static void apply_option(options_t *opts, parsed_option_t* option)
 		}
 		else if (option_type == F_UFNC) {
 			/* convert from UTF-16 to UTF-8 */
-			value = wchar_to_cstr((wchar_t*)option->parameter, CP_UTF8, NULL);
+			value = convert_wcs_to_str((wchar_t*)option->parameter, ConvertToUtf8 | ConvertExact);
 		} else {
 			/* convert from UTF-16 */
-			value = w2c((wchar_t*)option->parameter);
+			value = convert_wcs_to_str((wchar_t*)option->parameter, ConvertToPrimaryEncoding);
 		}
 		rsh_vector_add_ptr(opt.mem, value);
 #else
@@ -529,10 +530,10 @@ static void apply_option(options_t *opts, parsed_option_t* option)
 	case F_TFNC:
 	case F_UFNC:
 		/* call option parameter handler */
-		( ( void(*)(options_t *, char*, unsigned) )o->ptr )(opts, value, o->param);
+		( (void(*)(options_t*, char*, unsigned))o->ptr )(opts, value, o->param);
 		break;
 	case F_VFNC:
-		( ( void(*)(options_t *) )o->ptr )(opts); /* call option handler */
+		( (void(*)(options_t*))o->ptr )(opts); /* call option handler */
 		break;
 	case F_PRNT:
 		log_msg("%s", (char*)o->ptr);
@@ -555,13 +556,14 @@ static const char* find_conf_file(void)
 #endif
 #define CONFIG_FILENAME "rhashrc"
 
-	char *dir1, *path;
+	char* dir1;
+	char* path;
 
 #ifndef _WIN32 /* Linux/Unix part */
 	/* first check for $XDG_CONFIG_HOME/rhash/rhashrc file */
 	if ( (dir1 = getenv("XDG_CONFIG_HOME")) ) {
-		dir1 = make_path(dir1, "rhash");
-		path = make_path(dir1, CONFIG_FILENAME);
+		dir1 = make_path(dir1, "rhash", 0);
+		path = make_path(dir1, CONFIG_FILENAME, 0);
 		free(dir1);
 		if (is_regular_file(path)) {
 			rsh_vector_add_ptr(opt.mem, path);
@@ -571,7 +573,7 @@ static const char* find_conf_file(void)
 	}
 	/* then check for $HOME/.rhashrc file */
 	if ( (dir1 = getenv("HOME")) ) {
-		path = make_path(dir1, ".rhashrc");
+		path = make_path(dir1, ".rhashrc", 0);
 		if (is_regular_file(path)) {
 			rsh_vector_add_ptr(opt.mem, path);
 			return (conf_opt.config_file = path);
@@ -588,8 +590,8 @@ static const char* find_conf_file(void)
 
 	/* first check for the %APPDATA%\RHash\rhashrc config */
 	if ( (dir1 = getenv("APPDATA")) ) {
-		dir1 = make_path(dir1, "RHash");
-		path = make_path(dir1, CONFIG_FILENAME);
+		dir1 = make_path(dir1, "RHash", 0);
+		path = make_path(dir1, CONFIG_FILENAME, 0);
 		free(dir1);
 		if (is_regular_file(path)) {
 			rsh_vector_add_ptr(opt.mem, path);
@@ -601,8 +603,8 @@ static const char* find_conf_file(void)
 	/* then check for %HOMEDRIVE%%HOMEPATH%\rhashrc */
 	/* note that %USERPROFILE% is generally not a user home dir */
 	if ( (dir1 = getenv("HOMEDRIVE")) && (path = getenv("HOMEPATH"))) {
-		dir1 = make_path(dir1, path);
-		path = make_path(dir1, CONFIG_FILENAME);
+		dir1 = make_path(dir1, path, 0);
+		path = make_path(dir1, CONFIG_FILENAME, 0);
 		free(dir1);
 		if (is_regular_file(path)) {
 			rsh_vector_add_ptr(opt.mem, path);
@@ -612,8 +614,8 @@ static const char* find_conf_file(void)
 	}
 
 	/* check for ${PROGRAM_DIR}\rhashrc */
-	if (rhash_data.program_dir && (dir1 = w2c(rhash_data.program_dir))) {
-		path = make_path(dir1, CONFIG_FILENAME);
+	if (rhash_data.program_dir && (dir1 = convert_wcs_to_str(rhash_data.program_dir, ConvertToPrimaryEncoding))) {
+		path = make_path(dir1, CONFIG_FILENAME, 0);
 		free(dir1);
 		if (is_regular_file(path)) {
 			rsh_vector_add_ptr(opt.mem, path);
@@ -646,7 +648,7 @@ static int read_config(void)
 
 	if (!find_conf_file()) return 0;
 
-	file_init(&file, conf_opt.config_file, FILE_OPT_DONT_FREE_PATH);
+	file_init_by_print_path(&file, 0, conf_opt.config_file, 0);
 	fd = file_fopen(&file, FOpenRead);
 	file_cleanup(&file);
 	if (!fd) return -1;
@@ -655,7 +657,8 @@ static int read_config(void)
 		size_t index;
 		cmdline_opt_t* t;
 		char* line = str_trim(buf);
-		char  *name, *value;
+		char* name;
+		char* value;
 
 		if (*line == 0 || IS_COMMENT(*line)) continue;
 
@@ -712,11 +715,11 @@ static int read_config(void)
  * @param option structure to receive the parsed option info
  * @param parg pointer to a command line argument
  */
-static void parse_long_option(parsed_option_t* option, rsh_tchar ***parg)
+static void parse_long_option(parsed_option_t* option, rsh_tchar*** parg)
 {
 	size_t length;
 	rsh_tchar* eq_sign;
-	cmdline_opt_t *t;
+	cmdline_opt_t* t;
 	char* name;
 
 #ifdef _WIN32
@@ -743,7 +746,8 @@ static void parse_long_option(parsed_option_t* option, rsh_tchar ***parg)
 		length -= 2;
 	} else fail = 1;
 
-	if (fail) fail_on_unknow_option(w2c(**parg));
+	if (fail)
+		fail_on_unknow_option(convert_wcs_to_str(**parg, ConvertToUtf8));
 #else
 	option->name = **parg;
 	name =  **parg + 2; /* skip "--" */
@@ -772,7 +776,7 @@ struct parsed_cmd_line_t
 {
 	blocks_vector_t options; /* array of parsed options */
 	int  argc;
-	char **argv;
+	char** argv;
 #ifdef _WIN32
 	rsh_tchar** warg; /* program arguments in Unicode */
 #endif
@@ -799,8 +803,9 @@ static void parse_cmdline_options(struct parsed_cmd_line_t* cmd_line)
 {
 	int argc;
 	int b_opt_end = 0;
-	rsh_tchar **parg, **end_arg;
-	parsed_option_t *next_opt;
+	rsh_tchar** parg;
+	rsh_tchar** end_arg;
+	parsed_option_t* next_opt;
 
 #ifdef _WIN32
 	parg = cmd_line->warg = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -842,13 +847,13 @@ static void parse_cmdline_options(struct parsed_cmd_line_t* cmd_line)
 			/* parse short options. A string of several characters is interpreted
 			 * as separate short options */
 			for (ptr = *parg + 1; *ptr; ptr++) {
-				cmdline_opt_t *t;
+				cmdline_opt_t* t;
 				char ch = (char)*ptr;
 
 #ifdef _WIN32
 				if (((unsigned)*ptr) >= 128) {
 					ptr[1] = 0;
-					fail_on_unknow_option(w2c(ptr));
+					fail_on_unknow_option(convert_wcs_to_str(ptr, ConvertToUtf8));
 				}
 #endif
 				next_opt = new_option(cmd_line);
@@ -886,7 +891,7 @@ static void parse_cmdline_options(struct parsed_cmd_line_t* cmd_line)
  *
  * @param cmd_line the parsed options information
  */
-static void apply_cmdline_options(struct parsed_cmd_line_t *cmd_line)
+static void apply_cmdline_options(struct parsed_cmd_line_t* cmd_line)
 {
 	size_t count = cmd_line->options.size;
 	size_t i;
@@ -959,15 +964,15 @@ static void apply_cmdline_options(struct parsed_cmd_line_t *cmd_line)
  */
 static void set_default_sums_flags(const char* progName)
 {
-	char *buf;
+	char* buf;
 	int res = 0;
 
 	/* remove directory name from path */
 	const char* p = strrchr(progName, '/');
-	if (p) progName = p+1;
+	if (p) progName = p + 1;
 #ifdef _WIN32
 	p = strrchr(progName, '\\');
-	if (p) progName = p+1;
+	if (p) progName = p + 1;
 #endif
 
 	/* convert progName to lowercase */
@@ -1097,7 +1102,7 @@ static void cmd_line_destroy(void)
  *
  * @param argv program arguments
  */
-void read_options(int argc, char *argv[])
+void read_options(int argc, char* argv[])
 {
 	opt.mem = rsh_vector_new_simple();
 	opt.search_data = file_search_data_new();

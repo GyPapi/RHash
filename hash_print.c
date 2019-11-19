@@ -42,6 +42,7 @@ enum {
 	PRINT_NEWLINE,
 	PRINT_FILEPATH,
 	PRINT_BASENAME,
+	PRINT_URLPATH,
 	PRINT_URLNAME,
 	PRINT_SIZE,
 	PRINT_MTIME /*PRINT_ATIME, PRINT_CTIME*/
@@ -58,7 +59,7 @@ static print_item* parse_percent_item(const char** str);
  * @param data optional string to store
  * @return allocated print_item
  */
-static print_item* new_print_item(unsigned flags, unsigned hash_id, const char *data)
+static print_item* new_print_item(unsigned flags, unsigned hash_id, const char* data)
 {
 	print_item* item = (print_item*)rsh_malloc(sizeof(print_item));
 	item->flags = flags;
@@ -76,7 +77,7 @@ static print_item* new_print_item(unsigned flags, unsigned hash_id, const char *
  *   is changed to point to the next symbol after parsed sequence
  * @return result character
  */
-static char parse_escaped_char(const char **pformat)
+static char parse_escaped_char(const char** pformat)
 {
 	const char* start = *pformat;
 	switch ( *((*pformat)++) ) {
@@ -121,10 +122,13 @@ static char parse_escaped_char(const char **pformat)
  *
  * @return a print_item list with parsed information
  */
-print_item* parse_print_string(const char* format, unsigned *sum_mask)
+print_item* parse_print_string(const char* format, unsigned* sum_mask)
 {
-	char *buf, *p;
-	print_item *list = NULL, **tail, *item = NULL;
+	char* buf;
+	char* p;
+	print_item* list = NULL;
+	print_item* item = NULL;
+	print_item** tail;
 
 	buf = p = (char*)rsh_malloc( strlen(format) + 1 );
 	tail = &list;
@@ -187,20 +191,25 @@ print_item* parse_print_string(const char* format, unsigned *sum_mask)
  * @param flags pointer to unsigned variable to receive print flags
  * @return directive id on success, 0 on fail
  */
-static unsigned printf_name_to_id(const char* name, size_t length, unsigned *flags)
+static unsigned printf_name_to_id(const char* name, size_t length, unsigned* flags)
 {
 	char buf[20];
 	size_t i;
-	print_hash_info *info = hash_info_table;
+	print_hash_info* info = hash_info_table;
 	unsigned bit;
 
 	if (length > (sizeof(buf) - 1)) return 0;
 	for (i = 0; i < length; i++) buf[i] = tolower(name[i]);
 
 	/* check for old '%{urlname}' directive for compatibility */
-	if (length == 7 && memcmp(buf, "urlname", 7) == 0) {
-		*flags = PRINT_URLNAME;
-		return 0;
+	if (length == 7) {
+		if (memcmp(buf, "urlname", 7) == 0) {
+			*flags = PRINT_URLNAME;
+			return 0;
+		} if (memcmp(buf, "urlpath", 7) == 0) {
+			*flags = PRINT_URLPATH;
+			return 0;
+		}
 	} else if (length == 5 && memcmp(buf, "mtime", 5) == 0) {
 		*flags = PRINT_MTIME;
 		return 0;
@@ -230,15 +239,15 @@ print_item* parse_percent_item(const char** str)
 	int pad_with_zero_bit = 0;
 	print_item* item = NULL;
 
-	static const char *short_hash = "CMHTGWRAE";
-	static const char *short_other = "Llpfus";
+	static const char* short_hash = "CMHTGWRAE";
+	static const char* short_other = "LlpfUus";
 	static const unsigned hash_ids[] = {
 		RHASH_CRC32, RHASH_MD5, RHASH_SHA1, RHASH_TTH, RHASH_GOST12_256,
 		RHASH_WHIRLPOOL, RHASH_RIPEMD160, RHASH_AICH, RHASH_ED2K
 	};
 	static const unsigned other_flags[] = {
 		PRINT_ED2K_LINK, PRINT_ED2K_LINK, PRINT_FILEPATH, PRINT_BASENAME,
-		PRINT_URLNAME, PRINT_SIZE
+		PRINT_URLNAME, PRINT_URLNAME, PRINT_SIZE
 	};
 	/* detect the padding by zeros */
 	if (*format == '0') {
@@ -262,7 +271,7 @@ print_item* parse_percent_item(const char** str)
 	}
 	for (; isdigit((unsigned char)*format); format++) width = 10 * width + (*format - '0');
 
-	/* if a complicated token enconuntered */
+	/* if a complicated token encountered */
 	if (*format == '{') {
 		/* parse the token of the kind "%{some-token}" */
 		const char* p = ++format;
@@ -270,7 +279,7 @@ print_item* parse_percent_item(const char** str)
 		if (*p == '}') {
 			hash_id = printf_name_to_id(format, (int)(p - (format)), &modifier_flags);
 			format--;
-			if (hash_id || modifier_flags == PRINT_URLNAME || modifier_flags == PRINT_MTIME) {
+			if (hash_id || modifier_flags == PRINT_URLNAME || modifier_flags == PRINT_URLPATH || modifier_flags == PRINT_MTIME) {
 				/* set uppercase flag if the first letter of printf-entity is uppercase */
 				modifier_flags |= (format[1] & 0x20 ? 0 : PRINT_FLAG_UPPERCASE);
 				format = p;
@@ -299,6 +308,8 @@ print_item* parse_percent_item(const char** str)
 			if (modifier_flags == PRINT_ED2K_LINK) {
 				modifier_flags |= (*p & 0x20 ? 0 : PRINT_FLAG_UPPERCASE);
 				hash_id = RHASH_ED2K | RHASH_AICH;
+			} else if (modifier_flags == PRINT_URLNAME) {
+				modifier_flags |= (*p & 0x20 ? 0 : PRINT_FLAG_UPPERCASE);
 			}
 		} else {
 			return 0; /* no valid token found */
@@ -321,21 +332,16 @@ print_item* parse_percent_item(const char** str)
  * @param sums the file hash sums
  * @return 0 on success, -1 on fail with error code stored in errno
  */
-static int fprint_ed2k_url(FILE* out, struct file_info *info, int print_type)
+static int fprint_ed2k_url(FILE* out, struct file_info* info, int print_type)
 {
-	const char *filename = get_basename(file_info_get_utf8_print_path(info));
+	const char* filename = file_get_print_path(info->file, FPathUtf8 | FPathBaseName | FPathNotNull);
 	int upper_case = (print_type & PRINT_FLAG_UPPERCASE ? RHPR_UPPERCASE : 0);
-	int len = urlencode(NULL, filename) + int_len(info->size) + (info->sums_flags & RHASH_AICH ? 84 : 49);
-	char* buf = (char*)rsh_malloc( len + 1 );
+	char buf[104];
 	char* dst = buf;
-	int res;
-
-	assert(info->sums_flags & (RHASH_ED2K | RHASH_AICH));
+	assert(info->sums_flags & RHASH_ED2K);
 	assert(info->rctx);
-
-	strcpy(dst, "ed2k://|file|");
-	dst += 13;
-	dst += urlencode(dst, filename);
+	if (rsh_fprintf(out, "ed2k://|file|") < 0 || fprint_urlencoded(out, filename, upper_case) < 0)
+		return -1;
 	*dst++ = '|';
 	sprintI64(dst, info->size, 0);
 	dst += strlen(dst);
@@ -348,9 +354,7 @@ static int fprint_ed2k_url(FILE* out, struct file_info *info, int print_type)
 		dst += 32;
 	}
 	strcpy(dst, "|/");
-	res = PRINTF_RES(rsh_fprintf(out, "%s", buf));
-	free(buf);
-	return res;
+	return PRINTF_RES(rsh_fprintf(out, "%s", buf));
 }
 
 /**
@@ -364,7 +368,7 @@ static int fprint_ed2k_url(FILE* out, struct file_info *info, int print_type)
  */
 static int fprintI64(FILE* out, uint64_t u64, int width, int zero_pad)
 {
-	char *buf = (char*)rsh_malloc(width > 40 ? width + 1 : 41);
+	char* buf = (char*)rsh_malloc(width > 40 ? width + 1 : 41);
 	int len = int_len(u64);
 	int res;
 	sprintI64(buf, u64, width);
@@ -384,10 +388,10 @@ static int fprintI64(FILE* out, uint64_t u64, int width, int zero_pad)
  * @param sfv_format if =1, then change time format to 'hh:mm.ss YYYY-MM-DD'
  * @return 0 on success, -1 on fail with error code stored in errno
  */
-static int print_time64(FILE *out, uint64_t time64, int sfv_format)
+static int print_time64(FILE* out, uint64_t time64, int sfv_format)
 {
 	time_t time = (time_t)time64;
-	struct tm *t = localtime(&time);
+	struct tm* t = localtime(&time);
 	char* format = (sfv_format ? "%02u:%02u.%02u %4u-%02u-%02u" :
 		"%4u-%02u-%02u %02u:%02u:%02u");
 	int date_index = (sfv_format ? 3 : 0);
@@ -409,17 +413,15 @@ static int print_time64(FILE *out, uint64_t time64, int sfv_format)
 }
 
 /**
- * Print formatted file information to given output stream.
+ * Print formatted file information to the given output stream.
  *
  * @param out the stream to print information to
  * @param list the format according to which information shall be printed
  * @param info the file information
  * @return 0 on success, -1 on fail with error code stored in errno
  */
-int print_line(FILE* out, print_item* list, struct file_info *info)
+int print_line(FILE* out, print_item* list, struct file_info* info)
 {
-	const char* basename = get_basename(info->print_path), *tmp;
-	char *url = NULL;
 	char buffer[130];
 	int res = 0;
 #ifdef _WIN32
@@ -467,18 +469,17 @@ int print_line(FILE* out, print_item* list, struct file_info *info)
 				break;
 #endif
 			case PRINT_FILEPATH:
-				res = PRINTF_RES(rsh_fprintf(out, "%s", info->print_path));
+				res = PRINTF_RES(fprintf_file_t(out, NULL, info->file, 0));
 				break;
 			case PRINT_BASENAME: /* the filename without directory */
-				res = PRINTF_RES(rsh_fprintf(out, "%s", basename));
+				res = PRINTF_RES(fprintf_file_t(out, NULL, info->file, OutBaseName));
 				break;
+			case PRINT_URLPATH:
 			case PRINT_URLNAME: /* URL-encoded filename */
-				if (!url) {
-					tmp = get_basename(file_info_get_utf8_print_path(info));
-					url = (char*)rsh_malloc(urlencode(NULL, tmp) + 1);
-					urlencode(url, tmp);
-				}
-				res = PRINTF_RES(rsh_fprintf(out, "%s", url));
+				res = fprint_urlencoded(out,
+					file_get_print_path(info->file, FPathUtf8 | FPathNotNull |
+					(print_type == PRINT_URLNAME ? FPathBaseName : 0)),
+					list->flags & PRINT_FLAG_UPPERCASE);
 				break;
 			case PRINT_MTIME: /* the last-modified tine of the filename */
 				res = print_time64(out, info->file->mtime, 0);
@@ -491,7 +492,6 @@ int print_line(FILE* out, print_item* list, struct file_info *info)
 				break;
 		}
 	}
-	free(url);
 	if (res == 0 && fflush(out) < 0)
 		res = -1;
 #ifdef _WIN32
@@ -530,7 +530,7 @@ void init_hash_info_table(void)
 	unsigned short_opt_mask = RHASH_CRC32 | RHASH_MD5 | RHASH_SHA1 | RHASH_TTH | RHASH_ED2K |
 		RHASH_AICH | RHASH_WHIRLPOOL | RHASH_RIPEMD160 | RHASH_GOST12_256 | OPT_ED2K_LINK;
 	char* short_opt = "cmhteawrgl";
-	print_hash_info *info = hash_info_table;
+	print_hash_info* info = hash_info_table;
 	unsigned fullmask = RHASH_ALL_HASHES | OPT_ED2K_LINK;
 
 	memset(hash_info_table, 0, sizeof(hash_info_table));
@@ -539,8 +539,9 @@ void init_hash_info_table(void)
 		log_warning("old, incompatible version of librhash is loaded\n");
 
 	for (bit = 1; bit && bit <= fullmask; bit = bit << 1) {
-		const char *p;
-		char *e, *d;
+		const char* p;
+		char* e;
+		char* d;
 
 		if (!(bit & fullmask))
 			continue;
@@ -582,7 +583,8 @@ void init_hash_info_table(void)
  */
 void init_printf_format(strbuf_t* out)
 {
-	const char* fmt, *tail = 0;
+	const char* fmt;
+	const char* tail = 0;
 	unsigned bit, index = 0;
 	int uppercase;
 	unsigned need_modifier = 0;
@@ -612,7 +614,7 @@ void init_printf_format(strbuf_t* out)
 	} else if (opt.fmt == FMT_MAGNET) {
 		rsh_str_append(out, "magnet:?xl=%s&dn=%{urlname}");
 		fmt = "&xt=urn:\002:\001";
-		need_modifier = (RHASH_SHA1 | RHASH_BTIH);
+		need_modifier = RHASH_SHA1;
 		tail = "\\n";
 	} else if (opt.fmt == FMT_SIMPLE && 0 == (opt.sum_flags & (opt.sum_flags - 1))) {
 		fmt = "\001  %p\\n";
@@ -629,8 +631,8 @@ void init_printf_format(strbuf_t* out)
 
 	/* loop by hashes */
 	for (bit = 1 << index; bit && bit <= opt.sum_flags; bit = bit << 1, index++) {
-		const char *p;
-		print_hash_info *info;
+		const char* p;
+		print_hash_info* info;
 
 		if ((bit & opt.sum_flags) == 0)
 			continue;
@@ -654,7 +656,7 @@ void init_printf_format(strbuf_t* out)
 					if (info->short_char)
 						out->str[out->len++] = info->short_char & up_flag;
 					else {
-						char *letter;
+						char* letter;
 						out->str[out->len++] = '{';
 						letter = out->str + out->len;
 						rsh_str_append(out, info->short_name);
@@ -690,25 +692,21 @@ void init_printf_format(strbuf_t* out)
  * @param file the file info to print
  * @return 0 on success, -1 on fail with error code stored in errno
  */
-int print_sfv_header_line(FILE* out, file_t* file, const char* printpath)
+int print_sfv_header_line(FILE* out, file_t* file)
 {
 	char buf[24];
 
-	/* skip stdin stream */
-	if ((file->mode & FILE_IFSTDIN) != 0)
+	/* skip stdin stream and message-texts passed by command-line */
+	if (FILE_ISSPECIAL(file))
 		return 0;
-	/* skip unreadable files */
+	/* silently skip unreadable files, the access error will be reported later */
 	if (!file_is_readable(file))
 		return 0;
-	if (!printpath)
-		printpath = file_cpath(file);
-	if (printpath[0] == '.' && IS_PATH_SEPARATOR(printpath[1]))
-		printpath += 2;
 	sprintI64(buf, file->size, 12);
 	if (rsh_fprintf(out, "; %s  ", buf) < 0)
 		return -1;
 	print_time64(out, file->mtime, 1);
-	return PRINTF_RES(rsh_fprintf(out, " %s\n", printpath));
+	return PRINTF_RES(fprintf_file_t(out, " %s\n", file, 0));
 }
 
 /**
@@ -721,7 +719,7 @@ int print_sfv_header_line(FILE* out, file_t* file, const char* printpath)
 int print_sfv_banner(FILE* out)
 {
 	time_t cur_time = time(NULL);
-	struct tm *t = localtime(&cur_time);
+	struct tm* t = localtime(&cur_time);
 	if (!t)
 		return 0;
 	if (rsh_fprintf(out,

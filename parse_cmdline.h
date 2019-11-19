@@ -53,9 +53,9 @@ enum {
 
 #ifdef _WIN32
 	OPT_UTF8 = 0x10000000,
-	OPT_ANSI = 0x20000000,
-	OPT_OEM  = 0x40000000,
-	OPT_ENCODING = OPT_UTF8 | OPT_ANSI | OPT_OEM,
+	OPT_ENC_WIN = 0x20000000,
+	OPT_ENC_DOS = 0x40000000,
+	OPT_ENCODING = OPT_UTF8 | OPT_ENC_WIN | OPT_ENC_DOS,
 #endif
 
 	FMT_BSD     = 1,
@@ -85,21 +85,21 @@ struct options_t
 	char* embed_crc_delimiter;
 	char  path_separator;
 	int   find_max_depth;
-	struct vector_t *files_accept; /* suffixes of files to process */
-	struct vector_t *files_exclude; /* suffixes of files to exclude from processing */
-	struct vector_t *crc_accept;   /* suffixes of hash files to verify or update */
-	struct vector_t * bt_announce; /* BitTorrent announce URL */
+	struct vector_t* files_accept; /* suffixes of files to process */
+	struct vector_t* files_exclude; /* suffixes of files to exclude from processing */
+	struct vector_t* crc_accept;   /* suffixes of hash files to verify or update */
+	struct vector_t* bt_announce; /* BitTorrent announce URL */
 	size_t bt_piece_length; /* BitTorrent piece length */
 	opt_tchar*  bt_batch_file;   /* path to save a batch torrent to */
 
 	char** argv;
 	int has_files; /* flag: command line contain files */
 	struct file_search_data* search_data; /* files obtained from the command line */
-	struct vector_t *mem; /* allocated memory blocks that must be freed on exit */
+	struct vector_t* mem; /* allocated memory blocks that must be freed on exit */
 };
 extern struct options_t opt;
 
-void read_options(int argc, char *argv[]);
+void read_options(int argc, char* argv[]);
 void options_destroy(struct options_t*);
 
 #ifdef _WIN32

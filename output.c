@@ -20,7 +20,102 @@
 #endif
 
 /* global pointer to the selected method of percents output */
-struct percents_output_info_t *percents_output = NULL;
+struct percents_output_info_t* percents_output = NULL;
+
+#ifdef _WIN32
+#define IS_UTF8_OUTPUT(oflags, out) (((oflags) & OutForceUtf8) || (opt.flags & OPT_UTF8) || win_is_console_stream(out))
+#else
+#define IS_UTF8_OUTPUT(oflags, out) 1
+#endif
+
+/**
+ * Print formatted file path to the specified stream.
+ *
+ * @param out the stream to write to
+ * @param format the format string
+ * @param file the file, which path will be formatted
+ * @param output_flags bitmask containing mix of OutForceUtf8, OutBaseName, OutCountSymbols flags
+ * @return the number of characters printed, -1 on fail with error code stored in errno
+ */
+int fprintf_file_t(FILE* out, const char* format, struct file_t* file, unsigned output_flags)
+{
+ 	int res;
+	unsigned bnf = output_flags & FPathBaseName;
+	unsigned ppf = (IS_UTF8_OUTPUT(output_flags, out) ? FPathUtf8 | FPathNotNull : 0);
+	const char* print_path = file_get_print_path(file, ppf | bnf);
+	assert((int)OutBaseName == (int)FPathBaseName);
+#ifdef _WIN32
+	if (!print_path)
+		print_path = file_get_print_path(file, FPathUtf8 | FPathNotNull | bnf);
+	assert(print_path);
+	if (format && !(ppf & FPathUtf8)) {
+		char* native_format = convert_str_encoding(format, ConvertToNative);
+		if (!native_format) {
+			errno = EILSEQ;
+			return -1;
+		}
+		res = PRINTF_RES(rsh_fprintf(out, native_format, print_path));
+		if (res >= 0 && (output_flags & OutCountSymbols)) {
+			res = count_utf8_symbols(format);
+			res += (strstr(native_format, "%s") ? -2 + strlen(print_path) : 0);
+		}
+		free(native_format);
+		return res;
+	}
+#else
+	assert(print_path);
+#endif
+	if (rsh_fprintf(out, (format ? format : "%s"), print_path) < 0)
+		return -1;
+	if ((output_flags & OutCountSymbols) == 0)
+		return 0;
+	if (!format)
+		return count_utf8_symbols(print_path);
+	res = count_utf8_symbols(format);
+	res += (strstr(format, "%s") ? -2 + count_utf8_symbols(print_path) : 0);
+	return res;
+}
+
+/* safe url ascii characters are alphanum + "$-_.!'()," and unsafe: "\"<>{}[]%#/|\^~`@:;?=&+" */
+static unsigned url_good_char_mask[4] = { 0, 0x03ff7392, 0x87fffffe, 0x07fffffe };
+#define IS_URL_GOOD_CHAR(c) ((unsigned)(c) < 128 && (url_good_char_mask[c >> 5] & (1 << (c & 31))))
+
+/**
+ * Print to a stram an url-encoded representation of the given string.
+ *
+ * @param out the stream to print the result to
+ * @param str string to encode
+ * @param upper_case flag to print hex-codes in uppercase
+ * @return 0 on success, -1 on fail with error code stored in errno
+ */
+int fprint_urlencoded(FILE* out, const char* str, int upper_case)
+{
+	char buffer[1024];
+	char* buffer_limit = buffer + (sizeof(buffer) - 3);
+	char *p;
+	const char hex_add = (upper_case ? 'A' - 10 : 'a' - 10);
+	while (*str) {
+		for (p = buffer; p < buffer_limit && *str; str++) {
+			if (IS_URL_GOOD_CHAR(*str)) {
+				*(p++) = *str;
+			} else {
+				unsigned char hi = ((unsigned char)(*str) >> 4) & 0x0f;
+				unsigned char lo = (unsigned char)(*str) & 0x0f;
+				*(p++) = '%';
+				*(p++) = (hi > 9 ? hi + hex_add : hi + '0');
+				*(p++) = (lo > 9 ? lo + hex_add : lo + '0');
+			}
+		}
+		*p = 0;
+		if (rsh_fprintf(out, "%s", buffer) < 0)
+			return -1;
+	}
+	return 0;
+}
+
+/*=========================================================================
+ * Logging functions
+ *=========================================================================*/
 
 /**
  * Print message prefix before printing an error/warning message.
@@ -57,23 +152,6 @@ void log_msg(const char* format, ...)
 }
 
 /**
- * Print formatted file path to the specified stream.
- *
- * @param out the stream to write to
- * @param format the format string
- * @param file the file, which path will be formatted
- * @return the number of characters printed, -1 on error
- */
-int fprintf_file_t(FILE* out, const char* format, struct file_t* file)
-{
-#ifdef _WIN32
-	if (!FILE_TPATH(file) || !win_is_console_stream(out))
-		return rsh_fprintf(out, format, file_cpath(file));
-#endif
-	return rsh_fprintf_targ(out, format, FILE_TPATH(file));
-}
-
-/**
  * Print a formatted message, where a single %s substring is replaced with a filepath, and flush the log stream.
  * This function aims to correctly process utf8 conversion on windows.
  * Note: on windows the format string must be in utf8 encoding.
@@ -81,24 +159,23 @@ int fprintf_file_t(FILE* out, const char* format, struct file_t* file)
  * @param format the format string of a formatted message
  * @param file the file, which path will be formatted
  */
-void log_file_t_msg(const char* format, struct file_t* file)
+void log_msg_file_t(const char* format, struct file_t* file)
 {
-	fprintf_file_t(rhash_data.log, format, file);
+	fprintf_file_t(rhash_data.log, format, file, OutDefaultFlags);
 	fflush(rhash_data.log);
 }
 
 /**
- * Print file error to the program log.
+ * Print a formatted warning message to the program log.
  *
- * @param file the file, caused the error
+ * @param format the format string
  */
-void log_file_t_error(struct file_t* file)
+void log_warning(const char* format, ...)
 {
-	int file_errno = errno;
+	va_list ap;
+	va_start(ap, format);
 	print_log_prefix();
-	fprintf_file_t(rhash_data.log, "%s", file);
-	rsh_fprintf(rhash_data.log, ": %s\n", strerror(file_errno));
-	fflush(rhash_data.log);
+	log_va_msg(format, ap);
 }
 
 /**
@@ -115,20 +192,30 @@ void log_error(const char* format, ...)
 }
 
 /**
- * Print a formatted warning message to the program log.
+ * Print file error to the program log.
  *
- * @param format the format string
+ * @param file the file, caused the error
  */
-void log_warning(const char* format, ...)
+void log_error_file_t(struct file_t* file)
 {
-	va_list ap;
-	va_start(ap, format);
+	int file_errno = errno;
 	print_log_prefix();
-	log_va_msg(format, ap);
+	fprintf_file_t(rhash_data.log, "%s", file, OutDefaultFlags);
+	rsh_fprintf(rhash_data.log, ": %s\n", strerror(file_errno));
+	fflush(rhash_data.log);
 }
 
-/* global flag */
-int is_interrupted_reported = 0;
+/**
+ * Print a formated error message with file path.
+ *
+ * @param file the file, caused the error
+ */
+void log_error_msg_file_t(const char* format, struct file_t* file)
+{
+	print_log_prefix();
+	fprintf_file_t(rhash_data.log, format, file, OutDefaultFlags);
+	fflush(rhash_data.log);
+}
 
 /**
  * Log the message, that the program was interrupted.
@@ -136,13 +223,13 @@ int is_interrupted_reported = 0;
  */
 void report_interrupted(void)
 {
+	static int is_interrupted_reported = 0;
 	assert(rhash_data.stop_flags != 0);
-	if (rhash_data.stop_flags != InterruptedFlag || is_interrupted_reported)
-		return;
-	is_interrupted_reported = 1;
-	log_msg(_("Interrupted by user...\n"));
+	if (rhash_data.stop_flags == InterruptedFlag && !is_interrupted_reported) {
+		is_interrupted_reported = 1;
+		log_msg(_("Interrupted by user...\n"));
+	}
 }
-
 
 /**
  * Information about printed percents.
@@ -150,7 +237,6 @@ void report_interrupted(void)
 struct percents_t
 {
 	int points;
-	int use_cursor;
 	int same_output;
 	unsigned ticks;
 };
@@ -165,7 +251,7 @@ static struct percents_t percents;
  * @param info file information with path and its hash sums.
  * @return 0 on success, -1 on error
  */
-static int print_verbose_hash_check_error(struct file_info *info)
+static int print_verbose_hash_check_error(struct file_info* info)
 {
 	char actual[130], expected[130];
 	assert(HC_FAILED(info->hc.flags));
@@ -191,8 +277,8 @@ static int print_verbose_hash_check_error(struct file_info *info)
 		unsigned reported = 0;
 		int i;
 		for (i = 0; i < info->hc.hashes_num; i++) {
-			hash_value *hv = &info->hc.hashes[i];
-			char *expected_hash = info->hc.data + hv->offset;
+			hash_value* hv = &info->hc.hashes[i];
+			char* expected_hash = info->hc.data + hv->offset;
 			unsigned hid = hv->hash_id;
 			int pflags;
 			if ((info->hc.wrong_hashes & (1 << i)) == 0)
@@ -225,6 +311,24 @@ static int print_verbose_hash_check_error(struct file_info *info)
 }
 
 /**
+ * Print file path and no more than 52 spaces.
+ *
+ * @param out stream to print the filepath
+ * @param info pointer to the file-info structure
+ * @return 0 on success, -1 on i/o error
+ */
+static int print_aligned_filepath(FILE* out, struct file_info* info)
+{
+	int symbols_count = fprintf_file_t(out, NULL, info->file, OutCountSymbols);
+	if (symbols_count >= 0) {
+		char buf[56];
+		int spaces_count = (symbols_count <= 51 ? 52 - symbols_count : 1);
+		return PRINTF_RES(rsh_fprintf(out, "%s", str_set(buf, ' ', spaces_count)));
+	}
+	return -1;
+}
+
+/**
  * Print file path and result of its verification by hash.
  * Also if error occurred, print error message.
  *
@@ -233,13 +337,12 @@ static int print_verbose_hash_check_error(struct file_info *info)
  * @param print_result set to non-zero to print hash verification result
  * @return 0 on success, -1 on i/o error
  */
-static int print_check_result(struct file_info *info, int print_name, int print_result)
+static int print_check_result(struct file_info* info, int print_name, int print_result)
 {
 	int saved_errno = errno;
 	int res = 0;
-	if (print_name) {
-		res = PRINTF_RES(fprintf_file_t(rhash_data.out, "%-51s ", info->file));
-	}
+	if (print_name)
+		res = print_aligned_filepath(rhash_data.out, info);
 	if (print_result && res == 0) {
 		if (info->processing_result < 0) {
 			/* print error to stdout */
@@ -267,7 +370,7 @@ static int print_check_result(struct file_info *info, int print_name, int print_
  *             and zero after hash calculation finished.
  * @return 0 on success, -1 on i/o error
  */
-static int print_results_on_check(struct file_info *info, int init)
+static int print_results_on_check(struct file_info* info, int init)
 {
 	if (opt.mode & (MODE_CHECK | MODE_CHECK_EMBEDDED)) {
 		int print_name = (opt.flags & (OPT_PERCENTS | OPT_SKIP_OK) ? !init : init);
@@ -288,7 +391,7 @@ static int print_results_on_check(struct file_info *info, int init)
  * @param info pointer to the file-info structure
  * @return 0 on success, -1 if output to rhash_data.out failed
  */
-static int dummy_init_percents(struct file_info *info)
+static int dummy_init_percents(struct file_info* info)
 {
 	return print_results_on_check(info, 1);
 }
@@ -301,7 +404,7 @@ static int dummy_init_percents(struct file_info *info)
  * @param process_res non-zero if error occurred while hashing/checking
  * @return 0 on success, -1 if output to rhash_data.out failed
  */
-static int dummy_finish_percents(struct file_info *info, int process_res)
+static int dummy_finish_percents(struct file_info* info, int process_res)
 {
 	info->processing_result = process_res;
 	return print_results_on_check(info, 0);
@@ -315,11 +418,10 @@ static int dummy_finish_percents(struct file_info *info, int process_res)
  * @param info pointer to the file-info structure
  * @return 0 on success, -1 if output to rhash_data.out failed
  */
-static int dots_init_percents(struct file_info *info)
+static int dots_init_percents(struct file_info* info)
 {
 	int res = fflush(rhash_data.out);
 	fflush(rhash_data.log);
-	(void)info;
 	percents.points = 0;
 	if (print_results_on_check(info, 1) < 0)
 		res = -1;
@@ -334,13 +436,12 @@ static int dots_init_percents(struct file_info *info)
  * @param process_res non-zero if error occurred while hashing/checking
  * @return 0 on success, -1 if output to rhash_data.out failed
  */
-static int dots_finish_percents(struct file_info *info, int process_res)
+static int dots_finish_percents(struct file_info* info, int process_res)
 {
 	char buf[80];
 	info->processing_result = process_res;
-
 	if ((percents.points % 74) != 0) {
-		log_msg("%s 100%%\n", str_set(buf, ' ', 74 - (percents.points%74) ));
+		log_msg("%s 100%%\n", str_set(buf, ' ', 74 - (percents.points % 74)));
 	}
 	return print_results_on_check(info, 0);
 }
@@ -351,7 +452,7 @@ static int dots_finish_percents(struct file_info *info, int process_res)
  * @param info pointer to the file-info structure
  * @param offset the number of hashed bytes
  */
-static void dots_update_percents(struct file_info *info, uint64_t offset)
+static void dots_update_percents(struct file_info* info, uint64_t offset)
 {
 	const int pt_size = 1024*1024; /* 1MiB */
 	offset -= info->msg_offset; /* get real file offset */
@@ -359,9 +460,9 @@ static void dots_update_percents(struct file_info *info, uint64_t offset)
 
 	if (percents.points == 0) {
 		if (opt.mode & (MODE_CHECK | MODE_CHECK_EMBEDDED)) {
-			rsh_fprintf(rhash_data.log, _("\nChecking %s\n"), info->print_path);
+			rsh_fprintf(rhash_data.log, _("\nChecking %s\n"), file_get_print_path(info->file, FPathUtf8 | FPathNotNull));
 		} else {
-			rsh_fprintf(rhash_data.log, _("\nProcessing %s\n"), info->print_path);
+			rsh_fprintf(rhash_data.log, _("\nProcessing %s\n"), file_get_print_path(info->file, FPathUtf8 | FPathNotNull));
 		}
 		fflush(rhash_data.log);
 	}
@@ -386,20 +487,15 @@ static void dots_update_percents(struct file_info *info, uint64_t offset)
  * @param info pointer to the file-info structure
  * @return 0 on success, -1 if output to rhash_data.out failed
  */
-static int p_init_percents(struct file_info *info)
+static int p_init_percents(struct file_info* info)
 {
 	int res = fflush(rhash_data.out);
 	fflush(rhash_data.log);
-
-	(void)info;
-	percents.points      = 0;
-	percents.same_output = 0;
-	percents.use_cursor  = 0;
-
-	/* note: this output differs from print_check_result() by the file handle, so ingnoring errors */
-	rsh_fprintf(rhash_data.log, "%-51s ", info->print_path);
-
-	percents.same_output = (rhash_data.out == stdout && isatty(0));
+	/* ingnore output errors, while logging to rhash_data.log */
+	print_aligned_filepath(rhash_data.log, info);
+	percents.points = 0;
+	percents.same_output = (rhash_data.out == stdout && isatty(0) &&
+			rhash_data.log == stderr && isatty(1));
 	percents.ticks = rhash_get_ticks();
 	return res;
 }
@@ -412,9 +508,9 @@ static int p_init_percents(struct file_info *info)
  * @param info pointer to the file-info structure
  * @param offset the number of hashed bytes
  */
-static void p_update_percents(struct file_info *info, uint64_t offset)
+static void p_update_percents(struct file_info* info, uint64_t offset)
 {
-	static const char rot[4] = {'-', '\\', '|', '/'};
+	static const char rotated_bar[4] = {'-', '\\', '|', '/'};
 	int perc = 0;
 	unsigned ticks;
 
@@ -427,17 +523,17 @@ static void p_update_percents(struct file_info *info, uint64_t offset)
 
 	/* update percents no more than 20 times per second */
 	ticks = rhash_get_ticks(); /* clock ticks count in milliseconds */
-	if ((unsigned)(ticks - percents.ticks) < 50) return;
+	if ((unsigned)(ticks - percents.ticks) < 50)
+		return;
 
-	/* output percents or rotated bar */
+	/* output percents or a rotated bar */
 	if (info->size > 0) {
-		rsh_fprintf(rhash_data.log, "%u%%", perc);
+		rsh_fprintf(rhash_data.log, "%u%%\r", perc);
 		percents.points = perc;
 	} else {
-		rsh_fprintf(rhash_data.log, "%c", rot[(percents.points++) & 3]);
+		rsh_fprintf(rhash_data.log, "%c\r", rotated_bar[(percents.points++) & 3]);
 	}
-
-	rsh_fprintf(rhash_data.log, "\r%-51s ", info->print_path);
+	print_aligned_filepath(rhash_data.log, info);
 	fflush(rhash_data.log);
 	percents.ticks  = ticks;
 }
@@ -450,11 +546,9 @@ static void p_update_percents(struct file_info *info, uint64_t offset)
  * @param process_res non-zero if error occurred while hashing/checking
  * @return 0 on success, -1 if output to rhash_data.out failed
  */
-static int p_finish_percents(struct file_info *info, int process_res)
+static int p_finish_percents(struct file_info* info, int process_res)
 {
-	int need_check_result;
-
-	need_check_result = (opt.mode & (MODE_CHECK | MODE_CHECK_EMBEDDED)) &&
+	int need_check_result = (opt.mode & (MODE_CHECK | MODE_CHECK_EMBEDDED)) &&
 		!((opt.flags & OPT_SKIP_OK) && process_res == 0 && !HC_FAILED(info->hc.flags));
 	info->processing_result = process_res;
 
@@ -487,19 +581,19 @@ struct percents_output_info_t p_perc = {
  * @param stream_path the path to the log file, or NULL, to use the default stream
  * @param default_stream the default stream value, for the case of invalid stream_path
  */
-static void setup_log_stream(FILE **p_stream, file_t* file, const opt_tchar* stream_path, FILE* default_stream)
+static void setup_log_stream(FILE** p_stream, file_t* file, const opt_tchar* stream_path, FILE* default_stream)
 {
 	FILE* result;
-	/* set to the default stream, to enable error reporting via log_file_t_error() */
+	/* set to the default stream, to enable error reporting via log_error_file_t() */
 	*p_stream = default_stream;
 	if (!stream_path) {
-		file_init(file, (default_stream == stdout ? "(stdout)" : "(stderr)"), FILE_IFSTDIN);
+		file_init_by_print_path(file, NULL, (default_stream == stdout ? "(stdout)" : "(stderr)"), FileIsStdStream);
 		return;
 	}
-	file_tinit(file, stream_path, FILE_OPT_DONT_FREE_PATH);
+	file_init(file, stream_path, FileInitReusePath);
 	result = file_fopen(file, FOpenWrite);
 	if (!result) {
-		log_file_t_error(file);
+		log_error_file_t(file);
 		rsh_exit(2);
 	}
 	*p_stream = result;
@@ -547,7 +641,7 @@ int print_check_stats(void)
 		res = PRINTF_RES(rsh_fprintf(rhash_data.out, _("Everything OK\n")));
 	} else {
 		res = PRINTF_RES(rsh_fprintf(rhash_data.out, _("Errors Occurred: Errors:%-3u Miss:%-3u Success:%-3u Total:%-3u\n"),
-			rhash_data.processed - rhash_data.ok-rhash_data.miss, rhash_data.miss, rhash_data.ok, rhash_data.processed));
+			rhash_data.processed - rhash_data.ok - rhash_data.miss, rhash_data.miss, rhash_data.ok, rhash_data.processed));
 	}
 	return (fflush(rhash_data.out) < 0 ? -1 : res);
 }

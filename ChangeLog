@@ -1,3 +1,16 @@
+Sun, 17 Nov 2019 Aleksey
+	* new printf-format token '%{urlpath}' to print url-encoded file path
+
+Fri, 15 Nov 2019 Aleksey
+	* Bugfix: btih in magnet links shall be hex-encoded
+
+Tue 12 Nov 2019 Aleksey
+	* correctly align UTF8 file paths, while printing verification results
+	* respect UTF8 BOM when updating or verifying a hash file
+
+Thu 17 Oct 2019 Aleksey
+	* print a new-line after ed2k link, when --ed2k-link option is passed
+
 Mon 14 Oct 2019 Aleksey
 	* exit on output errors with exit_code = 2
 	* change option --update=<file> to update the specified file
