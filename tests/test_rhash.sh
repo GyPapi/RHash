@@ -76,15 +76,17 @@ done
 RANDNUM=$RANDOM
 [ -z $RANDNUM ] && which jot >/dev/null && RANDNUM=$(jot -r 1 1 32767)
 RHASH_TMP="$_tmp/rhash-test-$RANDNUM-$$"
-mkdir $RHASH_TMP || die "Unable to create tmp dir."
 remove_tmpdir()
 {
   cd "$SCRIPT_DIR"
   rm -rf "$RHASH_TMP";
 }
 trap remove_tmpdir EXIT
+
+# prepare test files
+mkdir $RHASH_TMP || die "Unable to create tmp dir."
+cp "$SCRIPT_DIR/test1K.data" $RHASH_TMP/test1K.data
 cd "$RHASH_TMP"
-cp "$SCRIPT_DIR/test1K.data" test1K.data
 
 # get the list of supported hash options
 HASHOPT="`$rhash --list-hashes|sed 's/ .*$//;/[^23]-/s/-\([0-9R]\)/\1/'|tr A-Z a-z`"
@@ -201,6 +203,15 @@ TEST_RESULT=$( $rhash -p '%f %s %xC %bc %bM %Bh %bE %bg %xT %xa %bW\n' -m "a" )
 TEST_EXPECTED="(message) 1 E8B7BE43 5c334qy BTAXLOOA6G3KQMODTHRGS5ZGME hvfkN/qlp/zhXR3cuerq6jd2Z7g= XXSSZMY54M7EMJC6AX55XVX3EQ xiyqtg44zbhmfjtr5eytk4rxreqkobntmoyddiolj7ad4aoorxzq 16614B1F68C5C25EAF6136286C9C12932F4F73E87E90A273 86f7e437faa5a7fce15d1ddcb9eaeaea377667b8 RLFCMATZFLWG6ENGOIDFGH5X27YN75MUCMKF42LTYRIADUAIPNBNCG6GIVATV37WHJBDSGRZCRNFSGUSEAGVMAMV4U5UPBME7WXCGGQ"
 check "$TEST_RESULT" "$TEST_EXPECTED"
 
+new_test "test %u modifier:           "
+mkdir dir1 && printf "a" > "dir1/=@+.txt"
+TEST_RESULT=$( $rhash -p '%uf %Uf %up %Up %uxc %uxC %ubc %ubC\n' "dir1/=@+.txt" )
+TEST_EXPECTED="%3d%40%2b.txt %3D%40%2B.txt dir1%2f%3d%40%2b.txt dir1%2F%3D%40%2B.txt e8b7be43 E8B7BE43 5c334qy 5C334QY"
+check "$TEST_RESULT" "$TEST_EXPECTED" .
+TEST_RESULT=$( $rhash -p '%uBc %UBc %Bc %u@c %U@c\n' -m "a" )
+TEST_EXPECTED="6Le%2bQw%3d%3d 6Le%2BQw%3D%3D 6Le+Qw== %e8%b7%beC %E8%B7%BEC"
+check "$TEST_RESULT" "$TEST_EXPECTED"
+
 new_test "test special characters:    "
 TEST_RESULT=$( $rhash -p '\63\1\277\x0f\x1\t\\ \x34\r' -m "" )
 TEST_EXPECTED=$( printf '\63\1\277\17\1\t\\ 4\r' )
@@ -216,7 +227,7 @@ rm -f ${F}1 ${F}2 ${F}3 ${F}4 ${F}l
 
 new_test "test eDonkey link:          "
 TEST_RESULT=$( $rhash -p '%L %l\n' -m "a" )
-TEST_EXPECTED="ed2k://|file|(message)|1|BDE52CB31DE33E46245E05FBDBD6FB24|h=Q336IN72UWT7ZYK5DXOLT2XK5I3XMZ5Y|/ ed2k://|file|(message)|1|bde52cb31de33e46245e05fbdbd6fb24|h=q336in72uwt7zyk5dxolt2xk5i3xmz5y|/"
+TEST_EXPECTED="ed2k://|file|%28message%29|1|BDE52CB31DE33E46245E05FBDBD6FB24|h=Q336IN72UWT7ZYK5DXOLT2XK5I3XMZ5Y|/ ed2k://|file|%28message%29|1|bde52cb31de33e46245e05fbdbd6fb24|h=q336in72uwt7zyk5dxolt2xk5i3xmz5y|/"
 check "$TEST_RESULT" "$TEST_EXPECTED" .
 # test verification of ed2k links
 TEST_RESULT=$( $rhash -L test1K.data | $rhash -vc - 2>/dev/null | grep test1K.data )
@@ -237,7 +248,9 @@ TEST_RESULT=$( $rhash --simple -a test1K.data | $rhash -vc - 2>/dev/null | grep 
 match "$TEST_RESULT" "^test1K.data *OK"
 
 new_test "test checking magnet link:  "
-TEST_RESULT=$( $rhash --magnet -a test1K.data | $rhash -vc - 2>&1 | grep test1K.data )
+# also test that '--check' verifies files in the current directory
+mkdir magnet_dir && $rhash --magnet -a test1K.data > magnet_dir/t.magnet
+TEST_RESULT=$( $rhash -vc magnet_dir/t.magnet 2>&1 | grep test1K.data )
 TEST_EXPECTED="^test1K.data *OK"
 match "$TEST_RESULT" "$TEST_EXPECTED"
 
@@ -263,10 +276,24 @@ match "$TEST_RESULT" "test_.*OK" .
 TEST_RESULT=$( $rhash --check-embedded 'test_[D3D99E8C].data' 2>/dev/null | grep data )
 match "$TEST_RESULT" "test_.*ERR" .
 mv 'test_[D3D99E8B].data' 'test.data'
-# at last test --embed-crc with --embed-crc-delimiter options
+# test --embed-crc and --embed-crc-delimiter options
 TEST_RESULT=$( $rhash --simple --embed-crc --embed-crc-delimiter=_ 'test.data' 2>/dev/null )
 check "$TEST_RESULT" "d3d99e8b  test_[D3D99E8B].data"
 rm 'test_[D3D99E8B].data' 'test_[D3D99E8C].data'
+
+new_test "test checking recursively:  "
+mkdir -p check/a && cp test1K.data check/a/b.data
+echo "a/b.data B70B4C26" > check/b.sfv
+TEST_RESULT=$( $rhash -Crc check/ | grep b.data )
+match "$TEST_RESULT" "^a/b.data *OK" .
+echo "B70B4C26" > check/a/b.data.crc32
+TEST_RESULT=$( $rhash --crc-accept=.crc32 -Crc check/a | grep "data.*OK" )
+match "$TEST_RESULT" "^check/a.b.data *OK" .
+# test that hash-files specified explicitly by command line are checked
+# in the current directory even with '--recursive' option
+echo "test1K.data B70B4C26" > check/t.sfv
+TEST_RESULT=$( $rhash -Crc check/t.sfv | grep "data.*OK" )
+match "$TEST_RESULT" "^test1K.data *OK"
 
 new_test "test wrong sums detection:  "
 $rhash -p '%c\n%m\n%e\n%h\n%g\n%t\n%a\n%w\n' -m WRONG > t.sum
@@ -275,8 +302,7 @@ check "$TEST_RESULT" ""
 rm t.sum
 
 new_test "test *accept options:       "
-rm -rf test_dir/
-mkdir -p test_dir && touch test_dir/file.txt test_dir/file.bin
+mkdir test_dir && touch test_dir/file.txt test_dir/file.bin
 # correctly handle MIGW posix path conversion
 echo "$MSYSTEM" | grep -q '^MINGW[36][24]' && SLASH=// || SLASH="/"
 # test also --path-separator option
@@ -286,7 +312,6 @@ TEST_RESULT=$( $rhash -rC --simple --accept=.txt --path-separator=\\ test_dir )
 check "$TEST_RESULT" "00000000  test_dir\\file.txt" .
 TEST_RESULT=$( $rhash -rc --crc-accept=.bin test_dir 2>/dev/null | sed -n '/Verifying/s/-//gp' )
 match "$TEST_RESULT" "( Verifying test_dir.file\\.bin )"
-rm -rf test_dir/
 
 new_test "test ignoring of log files: "
 touch t1.out t2.out
@@ -310,11 +335,14 @@ $rhash -c none-existent.file 2>/dev/null
 check "$?" "1" .
 $rhash -H test1K.data >/dev/null
 check "$?" "0"
-UNREADABLE_FILE="$RHASH_TMP/test-unreadable.file"
-printf "" > "$UNREADABLE_FILE" && chmod a-w "$UNREADABLE_FILE"
-$rhash -o "$UNREADABLE_FILE" -H test1K.data 2>/dev/null
-check "$?" "2" .
-rm -f "$UNREADABLE_FILE"
+UNWRITABLE_FILE="$RHASH_TMP/test-unwritable.file"
+printf "" > "$UNWRITABLE_FILE" && chmod a-w "$UNWRITABLE_FILE"
+# check if really unwritable, since superuser still can write
+if ! test -w "$UNWRITABLE_FILE" ; then
+ $rhash -o "$UNWRITABLE_FILE" -H test1K.data 2>/dev/null
+ check "$?" "2" .
+fi
+rm -f "$UNWRITABLE_FILE"
 
 # check if any test failed
 if [ $fail_cnt -gt 0 ]; then

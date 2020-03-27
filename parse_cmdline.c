@@ -9,6 +9,7 @@
 #include "win_utils.h"
 #include "librhash/rhash.h"
 #include <assert.h>
+#include <errno.h>
 #include <locale.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -42,6 +43,7 @@ static void print_help_line(const char* option, const char* format, ...)
 	va_start(args, format);
 	rsh_fprintf(rhash_data.out, "%s", option);
 	rsh_vfprintf(rhash_data.out, format, args);
+	va_end(args);
 }
 
 /**
@@ -102,7 +104,7 @@ static void print_help(void)
 	print_help_line("      --speed   ", _("Output per-file and total processing speed.\n"));
 	print_help_line("      --maxdepth=<n> ", _("Descend at most <n> levels of directories.\n"));
 	if (rhash_is_openssl_supported())
-		print_help_line("      --openssl=<list> ", _("List hash functions to be calculated using OpenSSL.\n"));
+		print_help_line("      --openssl=<list> ", _("Specify hash functions to be calculated using OpenSSL.\n"));
 	print_help_line("  -o, --output=<file> ", _("File to output calculation or checking results.\n"));
 	print_help_line("  -l, --log=<file>    ", _("File to log errors and verbose information.\n"));
 	print_help_line("      --sfv     ", _("Print hash sums, using SFV format (default).\n"));
@@ -587,6 +589,7 @@ static const char* find_conf_file(void)
 	}
 
 #else /* _WIN32 */
+	wchar_t* program_dir = get_program_dir();
 
 	/* first check for the %APPDATA%\RHash\rhashrc config */
 	if ( (dir1 = getenv("APPDATA")) ) {
@@ -614,7 +617,7 @@ static const char* find_conf_file(void)
 	}
 
 	/* check for ${PROGRAM_DIR}\rhashrc */
-	if (rhash_data.program_dir && (dir1 = convert_wcs_to_str(rhash_data.program_dir, ConvertToPrimaryEncoding))) {
+	if (program_dir && program_dir[0] && (dir1 = convert_wcs_to_str(program_dir, ConvertToPrimaryEncoding))) {
 		path = make_path(dir1, CONFIG_FILENAME, 0);
 		free(dir1);
 		if (is_regular_file(path)) {
@@ -1068,7 +1071,7 @@ static void make_final_options_checks(void)
 
 	if ((opt.flags & OPT_VERBOSE) && conf_opt.config_file) {
 		/* note that the first log_msg call shall be made after setup_output() */
-		log_msg(_("Config file: %s\n"), (conf_opt.config_file ? conf_opt.config_file : _("None")));
+		log_msg(_("Config file: %s\n"), conf_opt.config_file);
 	}
 
 	if (opt.bt_batch_file)
@@ -1118,12 +1121,14 @@ void read_options(int argc, char* argv[])
 	/* parse command line and apply encoding options */
 	parse_cmdline_options(&cmd_line);
 	read_config();
+	errno = 0;
 
 	/* setup the program output */
 	IF_WINDOWS(setup_console());
 	setup_output();
 
-	apply_cmdline_options(&cmd_line); /* process the rest of command options */
+	apply_cmdline_options(&cmd_line); /* process the rest of command line options */
+	options_destroy(&conf_opt);
 
 	/* options were processed, so we don't need them any more */
 	rsh_remove_exit_handler();

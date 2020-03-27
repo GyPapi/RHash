@@ -325,14 +325,24 @@ void rsh_remove_exit_handler(void)
 }
 
 /**
- * Call all installed exit handlers, starting from the latest one, and exit the program.
+ * Call all installed exit handlers, starting from the latest one.
+ *
+ * @param code the program exit code
+ */
+void rsh_call_exit_handlers(void)
+{
+	while (rhash_exit_handlers.handlers_count > 0)
+		rhash_exit_handlers.handlers[--rhash_exit_handlers.handlers_count]();
+}
+
+/**
+ * Call all installed exit handlers and exit the program.
  *
  * @param code the program exit code
  */
 void rsh_exit(int code)
 {
-	while (rhash_exit_handlers.handlers_count > 0)
-		rhash_exit_handlers.handlers[--rhash_exit_handlers.handlers_count]();
+	rsh_call_exit_handlers();
 	exit(code);
 }
 
@@ -601,7 +611,7 @@ void rsh_blocks_vector_destroy(blocks_vector_t* bvector)
  */
 strbuf_t* rsh_str_new(void)
 {
-	strbuf_t* res = (strbuf_t*)malloc(sizeof(strbuf_t));
+	strbuf_t* res = (strbuf_t*)rsh_malloc(sizeof(strbuf_t));
 	memset(res, 0, sizeof(strbuf_t));
 	return res;
 }

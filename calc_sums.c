@@ -223,11 +223,12 @@ int rename_file_by_embeding_crc32(struct file_info* info)
 	memset(&new_file, 0, sizeof(new_file));
 	if (file_modify_path(&new_file, info->file, suffix_start, FModifyInsertBeforeExtension) < 0 &&
 			file_modify_path(&new_file, info->file, suffix_start, FModifyAppendSuffix) < 0) {
-		log_error_msg_file_t(_("failed to rename file: %s\n"), info->file);
+		/* impossible situation: AppendSuffix can't fail, so not translating this error */
+		log_error_msg_file_t("impossible: failed to rename file: %s\n", info->file);
 	} else if (file_rename(info->file, &new_file) < 0) {
 		log_error(_("can't move %s to %s: %s\n"),
-			file_get_print_path(info->file, FPathUtf8 | FPathNotNull),
-			file_get_print_path(&new_file, FPathUtf8 | FPathNotNull), strerror(errno));
+			file_get_print_path(info->file, FPathPrimaryEncoding | FPathNotNull),
+			file_get_print_path(&new_file, FPathPrimaryEncoding | FPathNotNull), strerror(errno));
 	} else {
 		/* store the new path */
 		file_swap(info->file, &new_file);
@@ -354,25 +355,25 @@ int calculate_and_print_sums(FILE* out, file_t* out_file, file_t* file)
 
 	if ((opt.mode & MODE_UPDATE) && opt.fmt == FMT_SFV && res == 0) {
 		/* updating SFV file: print SFV header line */
-		if (print_sfv_header_line(out, file) < 0) {
+		if (print_sfv_header_line(out, out_file->mode, file) < 0) {
 			log_error_file_t(out_file);
 			res = -2;
 		}
 		if (opt.flags & OPT_VERBOSE) {
-			print_sfv_header_line(rhash_data.log, file);
+			print_sfv_header_line(rhash_data.log, rhash_data.log_file.mode, file);
 			fflush(rhash_data.log);
 		}
 	}
 
 	if (rhash_data.print_list && res == 0) {
 		if (!opt.bt_batch_file) {
-			if (print_line(out, rhash_data.print_list, &info) < 0) {
+			if (print_line(out, out_file->mode, rhash_data.print_list, &info) < 0) {
 				log_error_file_t(out_file);
 				res = -2;
 			}
 			/* print the calculated line to stderr/log-file if verbose */
 			else if ((opt.mode & MODE_UPDATE) && (opt.flags & OPT_VERBOSE)) {
-				print_line(rhash_data.log, rhash_data.print_list, &info);
+				print_line(rhash_data.log, rhash_data.log_file.mode, rhash_data.print_list, &info);
 			}
 		}
 
@@ -403,9 +404,8 @@ static int verify_sums(struct file_info* info)
 	}
 	rsh_timer_start(&timer);
 
-	if (calc_sums(info) < 0) {
-		finish_percents(info, -1);
-		return -1;
+	if (FILE_ISBAD(info->file) || calc_sums(info) < 0) {
+		return (finish_percents(info, -1) < 0 ? -2 : -1);
 	}
 	info->time = rsh_timer_stop(&timer);
 
@@ -478,7 +478,7 @@ int check_hash_file(file_t* file, int chdir)
 			}
 		} else {
 			/* TRANSLATORS: sample filename with embedded CRC32: file_[A1B2C3D4].mkv */
-			log_warning(_("file name doesn't contain a CRC32: %s\n"), file_get_print_path(file, FPathUtf8 | FPathNotNull));
+			log_warning_msg_file_t(_("file name doesn't contain a CRC32: %s\n"), file);
 			return -1;
 		}
 		return res;
@@ -535,6 +535,7 @@ int check_hash_file(file_t* file, int chdir)
 			log_error_msg_file_t(_("file is binary: %s\n"), file);
 			if (fd != stdin)
 				fclose(fd);
+			file_cleanup(&parent_dir);
 			return -1;
 		}
 
@@ -557,7 +558,7 @@ int check_hash_file(file_t* file, int chdir)
 		} else {
 			if (file_modify_path(&file_to_check, file, NULL, FModifyRemoveExtension) < 0) {
 				/* note: trailing whitespaces were removed from line by hash_check_parse_line() */
-				log_error(_("%s: can't parse line \"%s\"\n"), file_get_print_path(file, FPathUtf8 | FPathNotNull), line);
+				log_error(_("%s: can't parse line \"%s\"\n"), file_get_print_path(file, FPathPrimaryEncoding | FPathNotNull), line);
 				continue;
 			}
 		}
@@ -586,6 +587,7 @@ int check_hash_file(file_t* file, int chdir)
 			rhash_data.miss++;
 		rhash_data.processed++;
 	}
+	file_cleanup(&parent_dir);
 	time = rsh_timer_stop(&timer);
 
 	if (res >= -1 && (rsh_fprintf(rhash_data.out, "%s\n", str_set(buf, '-', 80)) < 0 ||
