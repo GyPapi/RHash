@@ -51,7 +51,8 @@ static void print_help_line(const char* option, const char* format, ...)
  */
 static void print_help(void)
 {
-	const char* hash_sum_format;
+	const char* checksum_format;
+	const char* digest_format;
 	assert(rhash_data.out != NULL);
 
 	/* print program version and usage */
@@ -62,37 +63,40 @@ static void print_help(void)
 	rsh_fprintf(rhash_data.out, _("Options:\n"));
 	print_help_line("  -V, --version    ", _("Print program version and exit.\n"));
 	print_help_line("  -h, --help       ", _("Print this help screen.\n"));
-	/* TRANSLATORS: format string for a help line, like: "Calculate SHA1 hash sum.\n" */
-	hash_sum_format = _("Calculate %s hash sum.\n");
-	print_help_line("  -C, --crc32      ", hash_sum_format, "CRC32");
-	print_help_line("      --crc32c     ", hash_sum_format, "CRC32C");
-	print_help_line("      --md4        ", hash_sum_format, "MD4");
-	print_help_line("  -M, --md5        ", hash_sum_format, "MD5");
-	print_help_line("  -H, --sha1       ", hash_sum_format, "SHA1");
-	print_help_line("      --sha224, --sha256, --sha384, --sha512 ", hash_sum_format, "SHA2");
-	print_help_line("      --sha3-224, --sha3-256, --sha3-384, --sha3-512 ", hash_sum_format, "SHA3");
-	print_help_line("  -T, --tth        ", hash_sum_format, "TTH");
-	print_help_line("      --btih       ", hash_sum_format, "BitTorrent InfoHash");
-	print_help_line("  -A, --aich       ", hash_sum_format, "AICH");
-	print_help_line("  -E, --ed2k       ", hash_sum_format, "eDonkey");
+	/* TRANSLATORS: help screen line template for CRC32 and CRC32C */
+	checksum_format = _("Calculate %s checksum.\n");
+	/* TRANSLATORS: help screen line template for MD5, SHA1, e.t.c.\n" */
+	digest_format = _("Calculate %s message digest.\n");
+	print_help_line("  -C, --crc32      ", checksum_format, "CRC32");
+	print_help_line("      --crc32c     ", checksum_format, "CRC32C");
+	print_help_line("      --md4        ", digest_format, "MD4");
+	print_help_line("  -M, --md5        ", digest_format, "MD5");
+	print_help_line("  -H, --sha1       ", digest_format, "SHA1");
+	print_help_line("      --sha224, --sha256, --sha384, --sha512 ", digest_format, "SHA2");
+	print_help_line("      --sha3-224, --sha3-256, --sha3-384, --sha3-512 ", digest_format, "SHA3");
+	print_help_line("  -T, --tth        ", digest_format, "TTH");
+	print_help_line("      --btih       ", digest_format, "BitTorrent InfoHash");
+	print_help_line("  -A, --aich       ", digest_format, "AICH");
+	print_help_line("  -E, --ed2k       ", digest_format, "eDonkey");
 	print_help_line("  -L, --ed2k-link  ", _("Calculate and print eDonkey link.\n"));
-	print_help_line("      --tiger      ", hash_sum_format, "Tiger");
-	print_help_line("  -G, --gost12-256 ", hash_sum_format, _("GOST R 34.11-2012, 256 bit"));
-	print_help_line("      --gost12-512 ", hash_sum_format, _("GOST R 34.11-2012, 512 bit"));
+	print_help_line("      --tiger      ", digest_format, "Tiger");
+	print_help_line("  -G, --gost12-256 ", digest_format, _("GOST R 34.11-2012, 256 bit"));
+	print_help_line("      --gost12-512 ", digest_format, _("GOST R 34.11-2012, 512 bit"));
 	/* TRANSLATORS: This hash function name should be translated to Russian only */
-	print_help_line("      --gost94     ", hash_sum_format, _("GOST R 34.11-94"));
+	print_help_line("      --gost94     ", digest_format, _("GOST R 34.11-94"));
 	/* TRANSLATORS: This hash function name should be translated to Russian only */
-	print_help_line("      --gost94-cryptopro ", hash_sum_format, _("GOST R 34.11-94 CryptoPro"));
-	print_help_line("      --ripemd160  ", hash_sum_format, "RIPEMD-160");
-	print_help_line("      --has160     ", hash_sum_format, "HAS-160");
-	print_help_line("      --edonr256, --edonr512  ", hash_sum_format, "EDON-R 256/512");
-	print_help_line("      --snefru128, --snefru256  ", hash_sum_format, "SNEFRU-128/256");
-	print_help_line("  -a, --all        ", _("Calculate all supported hashes.\n"));
+	print_help_line("      --gost94-cryptopro ", digest_format, _("GOST R 34.11-94 CryptoPro"));
+	print_help_line("      --ripemd160  ", digest_format, "RIPEMD-160");
+	print_help_line("      --has160     ", digest_format, "HAS-160");
+	print_help_line("      --blake2s,   --blake2b   ", digest_format, "BLAKE2S/BLAKE2B");
+	print_help_line("      --edonr256,  --edonr512  ", digest_format, "EDON-R 256/512");
+	print_help_line("      --snefru128, --snefru256 ", digest_format, "SNEFRU-128/256");
+	print_help_line("  -a, --all        ", _("Calculate all supported hash functions.\n"));
 	print_help_line("  -c, --check      ", _("Check hash files specified by command line.\n"));
 	print_help_line("  -u, --update=<file> ", _("Update the specified hash file.\n"));
 	print_help_line("  -e, --embed-crc  ", _("Rename files by inserting crc32 sum into name.\n"));
 	print_help_line("  -k, --check-embedded  ", _("Verify files by crc32 sum embedded in their names.\n"));
-	print_help_line("      --list-hashes  ", _("List the names of supported hashes, one per line.\n"));
+	print_help_line("      --list-hashes  ", _("List the names of supported hash functions, one per line.\n"));
 	print_help_line("  -B, --benchmark  ", _("Benchmark selected algorithm.\n"));
 	print_help_line("  -v, --verbose    ", _("Be verbose.\n"));
 	print_help_line("  -r, --recursive  ", _("Process directories recursively.\n"));
@@ -100,21 +104,21 @@ static void print_help(void)
 	print_help_line("  -m, --message=<text> ", _("Process the text message.\n"));
 	print_help_line("      --skip-ok    ", _("Don't print OK messages for successfully verified files.\n"));
 	print_help_line("  -i, --ignore-case  ", _("Ignore case of filenames when updating hash files.\n"));
-	print_help_line("  -P, --percents   ", _("Show percents, while calculating or checking hashes.\n"));
+	print_help_line("  -P, --percents   ", _("Show percents, while calculating or verifying message digests.\n"));
 	print_help_line("      --speed      ", _("Output per-file and total processing speed.\n"));
 	print_help_line("      --maxdepth=<n> ", _("Descend at most <n> levels of directories.\n"));
 	if (rhash_is_openssl_supported())
 		print_help_line("      --openssl=<list> ", _("Specify hash functions to be calculated using OpenSSL.\n"));
 	print_help_line("  -o, --output=<file> ", _("File to output calculation or checking results.\n"));
 	print_help_line("  -l, --log=<file>    ", _("File to log errors and verbose information.\n"));
-	print_help_line("      --sfv        ", _("Print hash sums, using SFV format (default).\n"));
-	print_help_line("      --bsd        ", _("Print hash sums, using BSD-like format.\n"));
-	print_help_line("      --simple     ", _("Print hash sums, using simple format.\n"));
-	print_help_line("      --hex        ", _("Print hash sums in hexadecimal format.\n"));
-	print_help_line("      --base32     ", _("Print hash sums in Base32 format.\n"));
-	print_help_line("  -b, --base64     ", _("Print hash sums in Base64 format.\n"));
+	print_help_line("      --sfv        ", _("Print message digests, using SFV format (default).\n"));
+	print_help_line("      --bsd        ", _("Print message digests, using BSD-like format.\n"));
+	print_help_line("      --simple     ", _("Print message digests, using simple format.\n"));
+	print_help_line("      --hex        ", _("Print message digests in hexadecimal format.\n"));
+	print_help_line("      --base32     ", _("Print message digests in Base32 format.\n"));
+	print_help_line("  -b, --base64     ", _("Print message digests in Base64 format.\n"));
 
-	print_help_line("  -g, --magnet     ", _("Print hash sums  as magnet links.\n"));
+	print_help_line("  -g, --magnet     ", _("Print message digests as magnet links.\n"));
 	print_help_line("      --torrent    ", _("Create torrent files.\n"));
 #ifdef _WIN32
 	print_help_line("      --utf8       ", _("Use UTF-8 encoding for output (Windows only).\n"));
@@ -122,7 +126,7 @@ static void print_help(void)
 	print_help_line("      --dos        ", _("Use DOS codepage for output (Windows only).\n"));
 #endif
 	print_help_line("      --template=<file> ", _("Load a printf-like template from the <file>\n"));
-	print_help_line("  -p, --printf=<format string>  ", _("Format and print hash sums.\n"));
+	print_help_line("  -p, --printf=<format string>  ", _("Format and print message digests.\n"));
 	print_help_line("                   ", _("See the RHash manual for details.\n"));
 	rsh_exit(0);
 }
@@ -132,7 +136,7 @@ static void print_help(void)
  */
 static void list_hashes(void)
 {
-	int id;
+	unsigned id;
 	for (id = 1; id < RHASH_ALL_HASHES; id <<= 1) {
 		const char* hash_name = rhash_get_name(id);
 		if (hash_name) rsh_fprintf(rhash_data.out, "%s\n", hash_name);
@@ -196,7 +200,7 @@ static void bt_announce(options_t* o, char* announce_url, unsigned unused)
  * Process an --openssl option.
  *
  * @param o pointer to the options structure to update
- * @param openssl_hashes comma delimited string with hash names
+ * @param openssl_hashes comma delimited string with names of hash functions
  * @param type ignored
  */
 static void openssl_flags(options_t* o, char* openssl_hashes, unsigned type)
@@ -226,8 +230,8 @@ static void openssl_flags(options_t* o, char* openssl_hashes, unsigned type)
 				}
 			}
 			if (bit > RHASH_ALL_HASHES) {
-				cur[length] = '\0'; /* terminate wrong hash name */
-				log_warning(_("openssl option doesn't support '%s' hash\n"), cur);
+				cur[length] = '\0'; /* terminate wrong hash function name */
+				log_warning(_("openssl option doesn't support '%s' hash function\n"), cur);
 			}
 		}
 	}
@@ -358,7 +362,7 @@ cmdline_opt_t cmdline_opt[] =
 	{ F_VFNC, 'h',   0, "help",   print_help, 0 },
 	{ F_VFNC, 'V',   0, "version", print_version, 0 },
 
-	/* hash sums options */
+	/* hash functions options */
 	{ F_UFLG, 'a',   0, "all",    &opt.sum_flags, RHASH_ALL_HASHES },
 	{ F_UFLG, 'C',   0, "crc32",  &opt.sum_flags, RHASH_CRC32 },
 	{ F_UFLG,   0,   0, "crc32c", &opt.sum_flags, RHASH_CRC32C },
@@ -392,6 +396,8 @@ cmdline_opt_t cmdline_opt[] =
 	{ F_UFLG,   0,   0, "snefru256", &opt.sum_flags, RHASH_SNEFRU256 },
 	{ F_UFLG,   0,   0, "edonr256",  &opt.sum_flags, RHASH_EDONR256 },
 	{ F_UFLG,   0,   0, "edonr512",  &opt.sum_flags, RHASH_EDONR512 },
+	{ F_UFLG,   0,   0, "blake2s",   &opt.sum_flags, RHASH_BLAKE2S },
+	{ F_UFLG,   0,   0, "blake2b",   &opt.sum_flags, RHASH_BLAKE2B },
 	{ F_UFLG, 'L',   0, "ed2k-link", &opt.sum_flags, OPT_ED2K_LINK },
 
 	/* output formats */
@@ -431,6 +437,7 @@ cmdline_opt_t cmdline_opt[] =
 	{ F_UFNC,   0,   0, "bt-announce", bt_announce, 0 },
 	{ F_TSTR,   0,   0, "bt-batch", &opt.bt_batch_file, 0 },
 	{ F_UFLG,   0,   0, "benchmark-raw", &opt.flags, OPT_BENCH_RAW },
+	{ F_UFLG,   0,   0, "no-detect-by-ext", &opt.flags, OPT_NO_DETECT_BY_EXT },
 	{ F_UFLG,   0,   0, "hex", &opt.flags, OPT_HEX },
 	{ F_UFLG,   0,   0, "base32", &opt.flags, OPT_BASE32 },
 	{ F_UFLG, 'b',   0, "base64", &opt.flags, OPT_BASE64 },
@@ -546,89 +553,125 @@ static void apply_option(options_t* opts, parsed_option_t* option)
 	}
 }
 
+#ifdef _WIN32
+# define rsh_tgetenv(name) _wgetenv(name)
+#else
+# define rsh_tgetenv(name) getenv(name)
+#endif
+#define COUNTOF(array) (sizeof(array) / sizeof(*array))
+enum ConfigLookupFlags
+{
+	ConfFlagNeedSplit = 8,
+	ConfFlagNoVars = 16
+};
+
+/**
+ * Check if a config file, specified by path subparts, is a regular file.
+ * On success the resulting path is stored as rhash_data.config_file.
+ *
+ * @param path_parts subparts of the path
+ * @param flags check flags
+ * @return 1 if the file is regular, 0 otherwise
+ */
+static int try_config(ctpath_t path_parts[], unsigned flags)
+{
+	const size_t parts_count = flags & 3;
+	tpath_t allocated = NULL;
+	ctpath_t path = NULL;
+	size_t i;
+	for (i = 0; i < parts_count; i++) {
+		ctpath_t sub_path = path_parts[i];
+		if (sub_path[0] == RSH_T('$') && !(flags & ConfFlagNoVars)) {
+			sub_path = rsh_tgetenv(sub_path + 1);
+			if (!sub_path || !sub_path[0]) {
+				free(allocated);
+				return 0;
+			}
+#ifndef _WIN32
+			/* check if the variable should be splitted */
+			if (flags == (2 | ConfFlagNeedSplit) && i == 0) {
+				tpath_t next;
+				ctpath_t parts[2];
+				parts[1] = path_parts[1];
+				sub_path = allocated = strdup(sub_path);
+				do {
+					next = strchr(sub_path, ':');
+					if (next)
+						*(next++) = '\0';
+					if (sub_path[0]) {
+						parts[0] = sub_path;
+						if (try_config(parts, COUNTOF(parts) | ConfFlagNoVars)) {
+							free(allocated);
+							return 1;
+						}
+					}
+					sub_path = next;
+				} while(sub_path);
+				free(allocated);
+				return 0;
+			}
+#endif
+		}
+		if (path) {
+			tpath_t old_allocated = allocated;
+			path = allocated = make_tpath(path, sub_path);
+			free(old_allocated);
+		} else {
+			path = sub_path;
+		}
+	}
+	assert(!rhash_data.config_file.real_path);
+	{
+		unsigned init_flags = FileInitRunFstat | (!allocated ? FileInitReusePath : 0);
+		int res = file_init(&rhash_data.config_file, path, init_flags);
+		free(allocated);
+		if (res == 0 && FILE_ISREG(&rhash_data.config_file))
+			return 1;
+		file_cleanup(&rhash_data.config_file);
+		return 0;
+	}
+}
+
 /**
  * Search for config file.
  *
- * @return the relative path to config file
+ * @return 1 if config file is found, 0 otherwise
  */
-static const char* find_conf_file(void)
+static int find_conf_file(void)
 {
 #ifndef SYSCONFDIR
 # define SYSCONFDIR "/etc"
 #endif
-#define CONFIG_FILENAME "rhashrc"
 
-	char* dir1;
-	char* path;
+#ifndef _WIN32
+	/* Linux/Unix part */
+	static ctpath_t xdg_conf_home[2] = { "$XDG_CONFIG_HOME", "rhash/rhashrc" };
+	static ctpath_t xdg_conf_default[2] = { "$HOME", ".config/rhash/rhashrc" };
+	static ctpath_t xdg_conf_dirs[2] = { "$XDG_CONFIG_DIRS", "rhash/rhashrc" };
+	static ctpath_t home_conf[2] = { "$HOME", ".rhashrc" };
+	static ctpath_t sysconf_dir[1] = { SYSCONFDIR "/rhashrc" };
 
-#ifndef _WIN32 /* Linux/Unix part */
-	/* first check for $XDG_CONFIG_HOME/rhash/rhashrc file */
-	if ( (dir1 = getenv("XDG_CONFIG_HOME")) ) {
-		dir1 = make_path(dir1, "rhash", 0);
-		path = make_path(dir1, CONFIG_FILENAME, 0);
-		free(dir1);
-		if (is_regular_file(path)) {
-			rsh_vector_add_ptr(opt.mem, path);
-			return (conf_opt.config_file = path);
-		}
-		free(path);
-	}
-	/* then check for $HOME/.rhashrc file */
-	if ( (dir1 = getenv("HOME")) ) {
-		path = make_path(dir1, ".rhashrc", 0);
-		if (is_regular_file(path)) {
-			rsh_vector_add_ptr(opt.mem, path);
-			return (conf_opt.config_file = path);
-		}
-		free(path);
-	}
-	/* then check for global config */
-	path = SYSCONFDIR "/" CONFIG_FILENAME;
-	if (is_regular_file(path)) {
-		return (conf_opt.config_file = path);
-	}
+	return (try_config(xdg_conf_home, COUNTOF(xdg_conf_home)) ||
+			try_config(xdg_conf_default, COUNTOF(xdg_conf_default)) ||
+			try_config(xdg_conf_dirs, COUNTOF(xdg_conf_dirs) | ConfFlagNeedSplit) ||
+			try_config(home_conf, COUNTOF(home_conf)) ||
+			try_config(sysconf_dir, COUNTOF(sysconf_dir)));
 
 #else /* _WIN32 */
-	wchar_t* program_dir = get_program_dir();
 
-	/* first check for the %APPDATA%\RHash\rhashrc config */
-	if ( (dir1 = getenv("APPDATA")) ) {
-		dir1 = make_path(dir1, "RHash", 0);
-		path = make_path(dir1, CONFIG_FILENAME, 0);
-		free(dir1);
-		if (is_regular_file(path)) {
-			rsh_vector_add_ptr(opt.mem, path);
-			return (conf_opt.config_file = path);
-		}
-		free(path);
+	static ctpath_t app_data[2] = { L"$APPDATA", L"RHash\\rhashrc" };
+	static ctpath_t home_conf[3] = { L"$HOMEDRIVE", L"$HOMEPATH", L"rhashrc" };
+
+	if (try_config(app_data, COUNTOF(app_data)) || try_config(home_conf, COUNTOF(home_conf))) {
+		return 1;
+	} else {
+		tpath_t prog_dir[2];
+		prog_dir[0] = get_program_dir();
+		prog_dir[1] = L"rhashrc";
+		return try_config((ctpath_t*)prog_dir, COUNTOF(prog_dir));
 	}
 
-	/* then check for %HOMEDRIVE%%HOMEPATH%\rhashrc */
-	/* note that %USERPROFILE% is generally not a user home dir */
-	if ( (dir1 = getenv("HOMEDRIVE")) && (path = getenv("HOMEPATH"))) {
-		dir1 = make_path(dir1, path, 0);
-		path = make_path(dir1, CONFIG_FILENAME, 0);
-		free(dir1);
-		if (is_regular_file(path)) {
-			rsh_vector_add_ptr(opt.mem, path);
-			return (conf_opt.config_file = path);
-		}
-		free(path);
-	}
-
-	/* check for ${PROGRAM_DIR}\rhashrc */
-	if (program_dir && program_dir[0] && (dir1 = convert_wcs_to_str(program_dir, ConvertToPrimaryEncoding))) {
-		path = make_path(dir1, CONFIG_FILENAME, 0);
-		free(dir1);
-		if (is_regular_file(path)) {
-			rsh_vector_add_ptr(opt.mem, path);
-			return (conf_opt.config_file = path);
-		}
-		free(path);
-	}
 #endif /* _WIN32 */
-
-	return (conf_opt.config_file = NULL); /* config file not found */
 }
 
 /**
@@ -640,20 +683,19 @@ static int read_config(void)
 {
 #define LINE_BUF_SIZE 2048
 	char buf[LINE_BUF_SIZE];
-	file_t file;
 	FILE* fd;
 	parsed_option_t option;
 	int res;
 
-	/* initialize conf_opt and opt structures */
+	/* initialize conf_opt */
 	memset(&conf_opt, 0, sizeof(opt));
 	conf_opt.find_max_depth = -1;
 
 	if (!find_conf_file()) return 0;
+	assert(!!rhash_data.config_file.real_path);
+	assert(FILE_ISREG(&rhash_data.config_file));
 
-	file_init_by_print_path(&file, 0, conf_opt.config_file, 0);
-	fd = file_fopen(&file, FOpenRead);
-	file_cleanup(&file);
+	fd = file_fopen(&rhash_data.config_file, FOpenRead);
 	if (!fd) return -1;
 
 	while (fgets(buf, LINE_BUF_SIZE, fd)) {
@@ -668,7 +710,7 @@ static int read_config(void)
 		/* search for '=' */
 		index = strcspn(line, "=");
 		if (line[index] == 0) {
-			log_warning(_("%s: can't parse line \"%s\"\n"), conf_opt.config_file, line);
+			log_warning(_("%s: can't parse line \"%s\"\n"), file_get_print_path(&rhash_data.config_file, FPathUtf8 | FPathNotNull), line);
 			continue;
 		}
 		line[index] = 0;
@@ -681,7 +723,7 @@ static int read_config(void)
 		}
 
 		if (!t->type) {
-			log_warning(_("%s: unknown option \"%s\"\n"), conf_opt.config_file, line);
+			log_warning(_("%s: unknown option \"%s\"\n"), file_get_print_path(&rhash_data.config_file, FPathUtf8 | FPathNotNull), line);
 			continue;
 		}
 
@@ -706,7 +748,8 @@ static int read_config(void)
 	res = fclose(fd);
 
 #ifdef _WIN32
-	if ( (opt.flags & OPT_ENCODING) == 0 ) opt.flags |= (conf_opt.flags & OPT_ENCODING);
+	if ( (opt.flags & OPT_ENCODING) == 0 )
+		opt.flags |= (conf_opt.flags & OPT_ENCODING);
 #endif
 	return (res == 0 ? 0 : -1);
 }
@@ -961,7 +1004,7 @@ static void apply_cmdline_options(struct parsed_cmd_line_t* cmd_line)
 }
 
 /**
- * Try to detect hash sums options from program name.
+ * Try to detect hash functions options from program name.
  *
  * @param progName the program name
  */
@@ -1004,11 +1047,13 @@ static void set_default_sums_flags(const char* progName)
 	else if (strstr(buf, "gost94"))  res |= RHASH_GOST94;
 	if (strstr(buf, "has160"))  res |= RHASH_HAS160;
 	if (strstr(buf, "ripemd160") || strstr(buf, "rmd160"))  res |= RHASH_RIPEMD160;
-	if (strstr(buf, "whirlpool"))  res |= RHASH_WHIRLPOOL;
-	if (strstr(buf, "edonr256"))   res |= RHASH_EDONR256;
-	if (strstr(buf, "edonr512"))   res |= RHASH_EDONR512;
-	if (strstr(buf, "snefru256"))  res |= RHASH_SNEFRU128;
-	if (strstr(buf, "snefru128"))  res |= RHASH_SNEFRU256;
+	if (strstr(buf, "whirlpool")) res |= RHASH_WHIRLPOOL;
+	if (strstr(buf, "edonr256"))  res |= RHASH_EDONR256;
+	if (strstr(buf, "edonr512"))  res |= RHASH_EDONR512;
+	if (strstr(buf, "blake2s"))   res |= RHASH_BLAKE2S;
+	if (strstr(buf, "blake2b"))   res |= RHASH_BLAKE2B;
+	if (strstr(buf, "snefru256")) res |= RHASH_SNEFRU128;
+	if (strstr(buf, "snefru128")) res |= RHASH_SNEFRU256;
 	if (strstr(buf, "ed2k-link")) res |= OPT_ED2K_LINK;
 	else if (strstr(buf, "ed2k")) res |= RHASH_ED2K;
 
@@ -1069,9 +1114,9 @@ static void make_final_options_checks(void)
 {
 	unsigned ext_format_bits = (opt.printf_str ? 0x100 : 0) | (opt.template_file ? 0x200 : 0);
 
-	if ((opt.flags & OPT_VERBOSE) && conf_opt.config_file) {
+	if ((opt.flags & OPT_VERBOSE) && !!rhash_data.config_file.real_path) {
 		/* note that the first log_msg call shall be made after setup_output() */
-		log_msg(_("Config file: %s\n"), conf_opt.config_file);
+		log_msg_file_t(_("Config file: %s\n"), &rhash_data.config_file);
 	}
 
 	if (opt.bt_batch_file)
@@ -1135,5 +1180,5 @@ void read_options(int argc, char* argv[])
 	cmd_line_destroy();
 
 	make_final_options_checks();
-	set_default_sums_flags(argv[0]); /* detect default hashes from program name */
+	set_default_sums_flags(argv[0]); /* detect default hash functions from program name */
 }

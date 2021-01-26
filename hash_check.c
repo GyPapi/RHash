@@ -1,16 +1,19 @@
-/* hash_check.c - verification of hashes of files */
+/* hash_check.c - verification of message digests of files */
 
 #include "hash_check.h"
+#include "calc_sums.h"
 #include "common_func.h"
 #include "hash_print.h"
 #include "output.h"
 #include "parse_cmdline.h"
+#include "rhash_main.h"
 #include "librhash/rhash.h"
 #include <assert.h>
 #include <ctype.h>  /* isspace */
+#include <errno.h>
 #include <string.h>
 
-/* hash conversion macros and functions */
+/* message digest conversion macros and functions */
 #define HEX_TO_DIGIT(c) ((c) <= '9' ? (c) & 0xF : ((c) - 'a' + 10) & 0xF)
 #define BASE32_TO_DIGIT(c) ((c) < 'A' ? (c) - '2' + 26 : ((c) & ~0x20) - 'A')
 #define BASE32_LENGTH(bits) (((bits) + 4) / 5)
@@ -91,7 +94,7 @@ static void process_backslashes(char* path)
 #define process_backslashes(path)
 #endif /* _WIN32 */
 
-/* convert a hash flag to index */
+/* convert a hash function bit-flag to the index of the bit */
 #if __GNUC__ >= 4 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 4) /* GCC >= 3.4 */
 # define get_ctz(x) __builtin_ctz(x)
 #else
@@ -131,9 +134,9 @@ static int code_digest_size(int digest_size)
 }
 
 /**
- * Calculate an OR-ed mask of hash-ids by a length of hash in bytes.
+ * Calculate a bit-mask of hash-ids by a length of message digest in bytes.
  *
- * @param digest_size length of a hash in bytes.
+ * @param digest_size length of a binary message digest in bytes.
  * @return mask of hash-ids with given hash length, 0 on fail.
  */
 static unsigned hash_check_mask_by_digest_size(int digest_size)
@@ -186,7 +189,7 @@ static int test_hash_char(char c)
  *
  * @param ptr the pointer to start scanning from
  * @param end pointer to scan to
- * @param p_len pointer to a number to store length of detected hash string
+ * @param p_len pointer to a number to store length of detected message digest
  * @return type of detected hash as combination of Fmt* flags
  */
 static int detect_hash_type(char** ptr, char* end, int* p_len)
@@ -227,10 +230,10 @@ static int detect_hash_type(char** ptr, char* end, int* p_len)
 }
 
 /**
- * Check if a hash with of the specified bit length is supported by the program.
+ * Check if a message digest of the specified bit length is supported by the program.
  *
- * @param length the bit length of a binary string
- * @return 1 if a hash of the specified bit length is supported, 0 otherwise
+ * @param length the bit length of a binary message digest value
+ * @return 1 if a message digest of the specified bit length is supported, 0 otherwise
  */
 static int is_acceptable_bit_length(int length)
 {
@@ -244,12 +247,12 @@ static int is_acceptable_bit_length(int length)
 }
 
 /**
- * Test that the given string contain a hexadecimal or base32 hash string
- * of one of supported hash sums.
+ * Test the given substring to be a hexadecimal or base32
+ * message digest of one of the supported hash functions.
  *
  * @param ptr the pointer to start scanning from
  * @param end pointer to scan to
- * @param p_len pointer to a number to store length of detected hash string
+ * @param p_len pointer to a number to store length of detected message digest
  * @return possible type of detected hash as algorithm RHASH id
  */
 static unsigned char test_hash_string(char** ptr, char* end, int* p_len)
@@ -278,9 +281,10 @@ static unsigned char test_hash_string(char** ptr, char* end, int* p_len)
  */
 static unsigned bsd_hash_name_to_id(const char* name, unsigned length)
 {
-#define code2mask_size (18 * 2)
+#define code2mask_size (19 * 2)
 	static unsigned code2mask[code2mask_size] = {
 		FOURC2U('A', 'I', 'C', 'H'), RHASH_AICH,
+		FOURC2U('B', 'L', 'A', 'K'), (RHASH_BLAKE2S | RHASH_BLAKE2B),
 		FOURC2U('B', 'T', 'I', 'H'), RHASH_BTIH,
 		FOURC2U('C', 'R', 'C', '3'), (RHASH_CRC32 | RHASH_CRC32C),
 		FOURC2U('E', 'D', '2', 'K'), RHASH_ED2K,
@@ -441,11 +445,11 @@ static int hash_check_find_str(hc_search* search, const char* format)
 				hv.offset = (unsigned short)(end - hc->data);
 			} else {
 				hv.offset = (unsigned short)(begin - hc->data);
-				hv.format = test_hash_string(&begin, end, &len);
+				hv.format = test_hash_string(&begin, end, &len) & search->hash_type;
 			}
 			if (!hv.format) return 0;
 			if (*search_str == '\3') {
-				/* verify hash type */
+				/* verify message digest type */
 				int bit_length = rhash_get_digest_size(search->expected_hash_id) * 8;
 				hv.format &= search->hash_type;
 				if ((len * 4) != bit_length)
@@ -521,10 +525,12 @@ static int hash_check_find_str(hc_search* search, const char* format)
  * For a magnet/ed2k links file size is also parsed.
  *
  * @param line the line to parse
- * @param hashes structure to store parsed hashes, file path and file size
+ * @param hashes structure to store parsed message digests, file path and file size
+ * @param expected_hash_mask hash mask of expected algorithms
+ * @param check_eol boolean flag meaning that '\n' at the end of the line is required
  * @return 1 on success, 0 if couldn't parse the line
  */
-int hash_check_parse_line(char* line, hash_check* hashes, int check_eol)
+int hash_check_parse_line(char* line, hash_check* hashes, unsigned expected_hash_mask, int check_eol)
 {
 	hc_search hs;
 	char* le = strchr(line, '\0'); /* set pointer to the end of line */
@@ -631,17 +637,22 @@ int hash_check_parse_line(char* line, hash_check* hashes, int check_eol)
 			while (hash_check_find_str(&hs, "$\6\2"));
 			if (hashes->hashes_num > 1)
 				reversed = 1;
-		} else if (hash_check_find_str(&hs, "\2\7")) {
-			if (hs.begin == hs.end) {
-				/* the line contains no file path, only a single hash */
-				single_hash = 1;
-			} else {
-				while (hash_check_find_str(&hs, "\2\6"));
-				/* drop an asterisk before filename if present */
-				if (*hs.begin == '*')
-					hs.begin++;
-			}
-		} else bad = 1;
+		} else {
+			hs.hash_type = FmtAll;
+			if (hash_check_find_str(&hs, "\2\7")) {
+				if (hs.begin == hs.end) {
+					/* the line contains no file path, only a single hash */
+					single_hash = 1;
+				} else {
+					if (hs.hc->hashes_num == 1 && hs.hc->hashes[0].format != FmtBase64)
+						hs.hash_type &= ~FmtBase64;
+					while (hash_check_find_str(&hs, "\2\6"));
+					/* drop an asterisk before filename if present */
+					if (*hs.begin == '*')
+						hs.begin++;
+				}
+			} else bad = 1;
+		}
 
 		if (hs.begin >= hs.end && !single_hash)
 			bad = 1;
@@ -668,7 +679,7 @@ int hash_check_parse_line(char* line, hash_check* hashes, int check_eol)
 	}
 
 	if (reversed) {
-		/* change the order of hash values from reversed back to forward */
+		/* change reversed order of message digests to the forward order */
 		for (i = 0, j = hashes->hashes_num - 1; i < j; i++, j--) {
 			hash_value tmp = hashes->hashes[i];
 			hashes->hashes[i] = hashes->hashes[j];
@@ -676,14 +687,14 @@ int hash_check_parse_line(char* line, hash_check* hashes, int check_eol)
 		}
 	}
 
-	/* post-process parsed hashes */
+	/* post-process parsed message digests */
 	for (i = 0; i < hashes->hashes_num; i++) {
 		hash_value* hv = &hashes->hashes[i];
 		char* hash_str = hashes->data + hv->offset;
-		hash_str[hv->length] = '\0'; /* terminate the hash string */
+		hash_str[hv->length] = '\0'; /* terminate the message digest */
 
 		if (hv->hash_id == 0) {
-			/* calculate hash mask */
+			/* calculate bit-mask of hash function ids */
 			unsigned mask = 0;
 			if (hv->format & FmtHex) {
 				mask |= hash_check_mask_by_digest_size(hv->length >> 1);
@@ -696,8 +707,8 @@ int hash_check_parse_line(char* line, hash_check* hashes, int check_eol)
 				mask |= hash_check_mask_by_digest_size(BASE64_BIT_SIZE(hv->length) / 8);
 			}
 			assert(mask != 0);
-			if ((mask & opt.sum_flags) != 0)
-				mask &= opt.sum_flags;
+			if ((mask & expected_hash_mask) != 0)
+				mask &= expected_hash_mask;
 			hv->hash_id = mask;
 		}
 		hashes->hash_mask |= hv->hash_id;
@@ -711,13 +722,13 @@ enum {
 };
 
 /**
- * Compare two hash strings. For base64 encoding, the case-sensitive comparasion is done.
+ * Compare two message digests. For base64 encoding, the case-sensitive comparasion is done.
  * For hexadecimal or base32 encodings, the case-insensitive match occurs.
  * For the GOST94 hash, the additional reversed case-insensitive match is done.
  *
- * @param calculated_hash the calculated hash, for the hex/base32 the hash is an upper-case string.
- * @param expected a hash value from a hash file to match against
- * @param length length of the hash strings
+ * @param calculated_hash the calculated message digest, for the hex/base32 the value must be in upper case
+ * @param expected a message digest from a hash file to match against
+ * @param length length of the message digests
  * @param comparision_mode 0, CompareHashCaseSensitive or CompareHashReversed comparision mode
  */
 static int is_hash_string_equal(const char* calculated_hash, const char* expected, size_t length, int comparision_mode)
@@ -745,7 +756,7 @@ static int is_hash_string_equal(const char* calculated_hash, const char* expecte
  * context contains CRC32 and makes no checks for this.
  *
  * @param rhash context
- * @return crc32 hash sum
+ * @return crc32 checksum
  */
 unsigned get_crc32(struct rhash_context* ctx)
 {
@@ -756,13 +767,13 @@ unsigned get_crc32(struct rhash_context* ctx)
 }
 
 /**
- * Verify calculated hashes against original values.
+ * Verify calculated message digests against original values.
  * Also verify the file size and embedded CRC32 if present.
  * The HC_WRONG_* bits are set in the hashes->flags field on fail.
  *
- * @param hashes 'original' parsed hash values, to verify against
- * @param ctx the rhash context containing calculated hash values
- * @return 1 on successfull verification, 0 on hash sums mismatch
+ * @param hashes 'original' parsed message digests, to verify against
+ * @param ctx the rhash context containing calculated message digests
+ * @return 1 on successfull verification, 0 on message digests mismatch
  */
 int do_hash_sums_match(hash_check* hashes, struct rhash_context* ctx)
 {
@@ -776,7 +787,7 @@ int do_hash_sums_match(hash_check* hashes, struct rhash_context* ctx)
 	if ((hashes->flags & HC_HAS_FILESIZE) != 0 && hashes->file_size != ctx->msg_size)
 		hashes->flags |= HC_WRONG_FILESIZE;
 
-	/* verify embedded CRC32 hash sum, if present */
+	/* verify embedded CRC32 checksum, if present */
 	if ((hashes->flags & HC_HAS_EMBCRC32) != 0 && get_crc32(ctx) != hashes->embedded_crc32)
 		hashes->flags |= HC_WRONG_EMBCRC32;
 
@@ -798,7 +809,7 @@ int do_hash_sums_match(hash_check* hashes, struct rhash_context* ctx)
 			int bit_length;
 			int comparision_mode;
 
-			/* skip already verified hashes and hashes with different digest size */
+			/* skip already verified message digests and message digests of different size */
 			if (!(unverified_mask & (1 << j)) || !(hv->hash_id & hash_id))
 				continue;
 			comparision_mode = 0;
@@ -842,10 +853,10 @@ int do_hash_sums_match(hash_check* hashes, struct rhash_context* ctx)
 			if (!is_hash_string_equal(calculated_hash, expected_hash, hv->length, comparision_mode))
 				continue;
 
-			unverified_mask &= ~(1 << j); /* the j-th hash verified */
+			unverified_mask &= ~(1 << j); /* mark the j-th message digest as verified */
 			hashes->found_hash_ids |= hash_id;
 
-			/* end the loop if all hashes were successfully verified */
+			/* end the loop if all message digests were successfully verified */
 			if (unverified_mask == 0)
 				break;
 		}
@@ -855,4 +866,271 @@ int do_hash_sums_match(hash_check* hashes, struct rhash_context* ctx)
 	if (unverified_mask != 0)
 		hashes->flags |= HC_WRONG_HASHES;
 	return !HC_FAILED(hashes->flags);
+}
+
+/**
+ * Verify message digests of the file.
+ * In a case of fail, the error will be logged.
+ *
+ * @param info structure file path to process
+ * @return 0 on success, 1 on message digests mismatch,
+ *     -1/-2 on input/output error
+ */
+static int verify_sums(struct file_info* info)
+{
+	timedelta_t timer;
+	int res = 0;
+
+	/* initialize percents output */
+	if (init_percents(info) < 0) {
+		log_error_file_t(&rhash_data.out_file);
+		return -2;
+	}
+	rsh_timer_start(&timer);
+
+	if (FILE_ISBAD(info->file) || calc_sums(info) < 0) {
+		return (finish_percents(info, -1) < 0 ? -2 : -1);
+	}
+	info->time = rsh_timer_stop(&timer);
+
+	if (rhash_data.stop_flags) {
+		report_interrupted();
+		return 0;
+	}
+
+	if ((opt.flags & OPT_EMBED_CRC) &&
+			find_embedded_crc32(info->file, &info->hc.embedded_crc32)) {
+		info->hc.flags |= HC_HAS_EMBCRC32;
+		assert(info->hc.hash_mask & RHASH_CRC32);
+	}
+
+	if (!do_hash_sums_match(&info->hc, info->rctx))
+		res = 1;
+
+	if (finish_percents(info, res) < 0)
+		res = -2;
+
+	if ((opt.flags & OPT_SPEED) && info->sums_flags) {
+		print_file_time_stats(info);
+	}
+	return res;
+}
+
+/**
+ * Verify the file against the CRC32 checksum embedded into its filename.
+ *
+ * @param file the file to verify
+ * @return 0 on success, -1 on input error, -2 on results output error
+ */
+static int check_embedded_crc32(file_t* file)
+{
+	int res = 0;
+	unsigned crc32;
+	struct file_info info;
+	if (find_embedded_crc32(file, &crc32)) {
+		/* initialize file_info structure */
+		memset(&info, 0, sizeof(info));
+		info.file = file;
+		info.sums_flags = info.hc.hash_mask = RHASH_CRC32;
+		info.hc.flags = HC_HAS_EMBCRC32;
+		info.hc.embedded_crc32 = crc32;
+
+		res = verify_sums(&info);
+		if (res >= -1 && fflush(rhash_data.out) < 0) {
+			log_error_file_t(&rhash_data.out_file);
+			res = -2;
+		} else if (!rhash_data.stop_flags) {
+			if (res >= 0)
+				rhash_data.ok++;
+			else if (res == -1 && errno == ENOENT)
+				rhash_data.miss++;
+			rhash_data.processed++;
+		}
+	} else {
+		/* TRANSLATORS: sample filename with embedded CRC32: file_[A1B2C3D4].mkv */
+		log_warning_msg_file_t(_("file name doesn't contain a CRC32: %s\n"), file);
+		return -1;
+	}
+	return res;
+}
+
+/*
+ * Detect hash mask by the file extension.
+ *
+ * @param file the file which extension will be checked
+ * @return hash_id on success, 0 on fail
+ */
+static unsigned hash_mask_by_file_ext(file_t* file)
+{
+	const char* basename = file_get_print_path(file, FPathUtf8 | FPathBaseName);
+	if (basename) {
+		const char* ext = strrchr(basename, '.');
+		if (ext && *(++ext) != '\0') {
+			size_t length;
+			char buffer[20];
+			unsigned hash_id;
+			for (length = 0; '-' <= ext[length] && ext[length] <= 'z'; length++) {
+				if (length >= 20)
+					return 0; /* limit hash name length */
+				buffer[length] = toupper(ext[length]);
+			}
+			if (ext[length] == '\0') {
+				buffer[length] = '\0';
+				hash_id = bsd_hash_name_to_id(buffer, length);
+				if (hash_id != 0)
+					return hash_id;
+			}
+		}
+	}
+	return 0;
+}
+
+/**
+ * Verify message digests in a hash file.
+ * Lines beginning with ';' and '#' are ignored.
+ * In a case of fail, the error will be logged.
+ *
+ * @param file the file containing message digests to verify.
+ * @param chdir true if function should emulate chdir to directory of filepath before checking it.
+ * @return 0 on success, -1 on input error, -2 on results output error
+ */
+int check_hash_file(file_t* file, int chdir)
+{
+	FILE* fd;
+	file_t parent_dir;
+	file_t* p_parent_dir = 0;
+	char buf[4096];
+	timedelta_t timer;
+	struct file_info info;
+	int res = 0;
+	int line_number = 0;
+	unsigned init_flags = 0;
+	unsigned expected_hash_mask = opt.sum_flags;
+	double time;
+
+	/* process --check-embedded option */
+	if (opt.mode & MODE_CHECK_EMBEDDED)
+		return check_embedded_crc32(file);
+
+	/* initialize statistics */
+	rhash_data.processed = rhash_data.ok = rhash_data.miss = 0;
+	rhash_data.total_size = 0;
+
+	/* open file / prepare file descriptor */
+	if (FILE_ISSTDIN(file)) {
+		fd = stdin;
+	} else if ( !(fd = file_fopen(file, FOpenRead | FOpenBin) )) {
+		log_error_file_t(file);
+		return -1;
+	}
+
+	if (print_verifying_header(file) < 0) {
+		log_error_file_t(&rhash_data.out_file);
+		if (fd != stdin)
+			fclose(fd);
+		return -2;
+	}
+	rsh_timer_start(&timer);
+	memset(&parent_dir, 0, sizeof(parent_dir));
+
+	if (chdir) {
+		/* extract the parent directory */
+		file_modify_path(&parent_dir, file, NULL, FModifyGetParentDir);
+		p_parent_dir = &parent_dir;
+	}
+	if (!expected_hash_mask && !(opt.flags & OPT_NO_DETECT_BY_EXT))
+		expected_hash_mask = hash_mask_by_file_ext(file);
+
+	/* read hash file line by line */
+	for (line_number = 0; fgets(buf, sizeof(buf), fd); line_number++) {
+		char* line = buf;
+		file_t file_to_check;
+
+		/* skip unicode BOM */
+		if (STARTS_WITH_UTF8_BOM(buf)) {
+			line += 3;
+			if (line_number == 0)
+				init_flags = FileInitUtf8PrintPath; /* hash file is in UTF8 */
+		}
+
+		if (*line == 0)
+			continue; /* skip empty lines */
+
+		if (is_binary_string(line)) {
+			log_error(_("file is binary: %s:%d\n"), file_get_print_path(file, FPathPrimaryEncoding | FPathNotNull), line_number + 1);
+			if (fd != stdin)
+				fclose(fd);
+			file_cleanup(&parent_dir);
+			return -1;
+		}
+
+		/* skip comments and empty lines */
+		if (IS_COMMENT(*line) || *line == '\r' || *line == '\n')
+			continue;
+
+		memset(&info, 0, sizeof(info));
+
+		if (!hash_check_parse_line(line, &info.hc, expected_hash_mask, !feof(fd)))
+			continue;
+		if (info.hc.hash_mask == 0)
+			continue;
+
+		/* check if the hash file contains a message digest without a filename */
+		if (info.hc.file_path != NULL) {
+			int is_absolute = IS_PATH_SEPARATOR(info.hc.file_path[0]);
+			IF_WINDOWS(is_absolute = is_absolute || (info.hc.file_path[0] && info.hc.file_path[1] == ':'));
+			file_init_by_print_path(&file_to_check, (is_absolute ? NULL : p_parent_dir), info.hc.file_path, init_flags);
+		} else {
+			if (file_modify_path(&file_to_check, file, NULL, FModifyRemoveExtension) < 0) {
+				/* note: trailing whitespaces were removed from line by hash_check_parse_line() */
+				log_error(_("%s: can't parse line \"%s\"\n"), file_get_print_path(file, FPathPrimaryEncoding | FPathNotNull), line);
+				continue;
+			}
+		}
+
+		info.file = &file_to_check;
+		info.sums_flags = info.hc.hash_mask;
+		file_stat(&file_to_check, 0);
+
+		/* verify message digests of the file */
+		res = verify_sums(&info);
+
+		if (res >= -1 && fflush(rhash_data.out) < 0) {
+			log_error_file_t(&rhash_data.out_file);
+			res = -2;
+		}
+		file_cleanup(&file_to_check);
+
+		if (rhash_data.stop_flags || res < -1) {
+			break; /* stop on fatal error */
+		}
+
+		/* update statistics */
+		if (res == 0)
+			rhash_data.ok++;
+		else if (res == -1 && errno == ENOENT)
+			rhash_data.miss++;
+		rhash_data.processed++;
+	}
+	file_cleanup(&parent_dir);
+	time = rsh_timer_stop(&timer);
+
+	if (res >= -1 && (print_verifying_footer() < 0 || print_check_stats() < 0)) {
+		log_error_file_t(&rhash_data.out_file);
+		res = -2;
+	}
+
+	if (rhash_data.processed != rhash_data.ok)
+		rhash_data.non_fatal_error = 1;
+
+	if ((opt.flags & OPT_SPEED) && rhash_data.processed > 1)
+		print_time_stats(time, rhash_data.total_size, 1);
+
+	rhash_data.processed = 0;
+	/* check for input errors */
+	if (res >= 0 && ferror(fd))
+		res = -1;
+	if (fd != stdin)
+		fclose(fd);
+	return res;
 }

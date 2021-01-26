@@ -2,8 +2,8 @@
 
 include config.mak
 
-HEADERS = algorithms.h byte_order.h plug_openssl.h rhash.h rhash_timing.h rhash_torrent.h aich.h crc32.h ed2k.h edonr.h hex.h md4.h md5.h sha1.h sha256.h sha512.h sha3.h ripemd-160.h gost12.h gost94.h has160.h snefru.h tiger.h tth.h torrent.h ustd.h util.h whirlpool.h
-SOURCES = algorithms.c byte_order.c plug_openssl.c rhash.c rhash_timing.c rhash_torrent.c aich.c crc32.c ed2k.c edonr.c hex.c md4.c md5.c sha1.c sha256.c sha512.c sha3.c ripemd-160.c gost12.c gost94.c has160.c snefru.c tiger.c tiger_sbox.c tth.c torrent.c whirlpool.c whirlpool_sbox.c
+HEADERS = algorithms.h byte_order.h plug_openssl.h rhash.h rhash_timing.h rhash_torrent.h aich.h blake2b.h blake2s.h crc32.h ed2k.h edonr.h hex.h md4.h md5.h sha1.h sha256.h sha512.h sha3.h ripemd-160.h gost12.h gost94.h has160.h snefru.h tiger.h tth.h torrent.h ustd.h util.h whirlpool.h
+SOURCES = algorithms.c byte_order.c plug_openssl.c rhash.c rhash_timing.c rhash_torrent.c aich.c blake2b.c blake2s.c crc32.c ed2k.c edonr.c hex.c md4.c md5.c sha1.c sha256.c sha512.c sha3.c ripemd-160.c gost12.c gost94.c has160.c snefru.c tiger.c tiger_sbox.c tth.c torrent.c util.c whirlpool.c whirlpool_sbox.c
 OBJECTS = $(SOURCES:.c=.o)
 LIB_HEADERS = rhash.h rhash_torrent.h
 SO_HEADERS = $(LIB_HEADERS) $(LEGACY_HEADERS)
@@ -72,6 +72,12 @@ algorithms.o: algorithms.c byte_order.h ustd.h rhash.h algorithms.h \
  tth.h whirlpool.h
 	$(CC) -c $(CFLAGS) $< -o $@
 
+blake2b.o: blake2b.c blake2b.h ustd.h byte_order.h
+	$(CC) -c $(CFLAGS) $< -o $@
+
+blake2s.o: blake2s.c blake2s.h ustd.h byte_order.h
+	$(CC) -c $(CFLAGS) $< -o $@
+
 byte_order.o: byte_order.c byte_order.h ustd.h
 	$(CC) -c $(CFLAGS) $< -o $@
 
@@ -108,7 +114,7 @@ plug_openssl.o: plug_openssl.c algorithms.h rhash.h byte_order.h ustd.h \
 
 rhash.o: rhash.c byte_order.h ustd.h algorithms.h rhash.h torrent.h \
  sha1.h plug_openssl.h util.h hex.h
-	$(CC) -c $(CFLAGS) $< -o $@
+	$(CC) -c $(CFLAGS) $(VERSION_CFLAGS) $< -o $@
 
 rhash_timing.o: rhash_timing.c byte_order.h ustd.h rhash.h rhash_timing.h
 	$(CC) -c $(CFLAGS) $< -o $@
@@ -136,7 +142,7 @@ snefru.o: snefru.c byte_order.h ustd.h snefru.h
 	$(CC) -c $(CFLAGS) $< -o $@
 
 test_hashes.o: test_hashes.c byte_order.h ustd.h rhash_timing.h \
- rhash_torrent.h rhash.h test_hashes.h
+ rhash_torrent.h rhash.h test_hashes.h util.h
 	$(CC) -c $(CFLAGS) $< -o $@
 
 tiger.o: tiger.c byte_order.h ustd.h tiger.h
@@ -150,6 +156,9 @@ torrent.o: torrent.c byte_order.h ustd.h algorithms.h rhash.h hex.h \
 	$(CC) -c $(CFLAGS) $< -o $@
 
 tth.o: tth.c byte_order.h ustd.h tth.h tiger.h
+	$(CC) -c $(CFLAGS) $< -o $@
+
+util.o: util.c util.h
 	$(CC) -c $(CFLAGS) $< -o $@
 
 whirlpool.o: whirlpool.c byte_order.h ustd.h whirlpool.h
@@ -167,7 +176,7 @@ $(LIBRHASH_SOLINK):
 	ln -s $(LIBRHASH_SHARED) $(LIBRHASH_SOLINK)
 
 $(LIBRHASH_SHARED): $(SOURCES) $(EXPORTS_TARGET) $(SOLINK_TARGET)
-	$(CC) $(SHARED_CFLAGS) $(SOURCES) $(SHARED_LDFLAGS) -o $@
+	$(CC) $(SHARED_CFLAGS) $(VERSION_CFLAGS) $(SOURCES) $(SHARED_LDFLAGS) -o $@
 
 # build static library
 $(LIBRHASH_STATIC): $(OBJECTS)

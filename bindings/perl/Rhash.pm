@@ -16,14 +16,14 @@ our %EXPORT_TAGS = (
 		RHASH_GOST94_CRYPTOPRO RHASH_GOST12_256 RHASH_GOST12_512
 		RHASH_SHA224 RHASH_SHA256 RHASH_SHA384 RHASH_SHA512
 		RHASH_SHA3_224 RHASH_SHA3_256 RHASH_SHA3_384 RHASH_SHA3_512
-		RHASH_HAS160 RHASH_EDONR256 RHASH_EDONR512
-		RHASH_SNEFRU128 RHASH_SNEFRU256 RHASH_ALL)]
+		RHASH_BLAKE2S RHASH_BLAKE2B RHASH_EDONR256 RHASH_EDONR512
+		RHASH_HAS160 RHASH_SNEFRU128 RHASH_SNEFRU256 RHASH_ALL)]
 );
 
 Exporter::export_tags( );
 Exporter::export_ok_tags( qw(Functions Constants) );
 
-our $VERSION = '0.98';
+our $VERSION = '0.99';
 
 require XSLoader;
 XSLoader::load('Crypt::Rhash', $VERSION);
@@ -59,7 +59,9 @@ use constant RHASH_SHA3_512  => 0x2000000;
 use constant RHASH_CRC32C    => 0x4000000;
 use constant RHASH_SNEFRU128 => 0x8000000;
 use constant RHASH_SNEFRU256 => 0x10000000;
-use constant RHASH_ALL       => 0x1FFFFFFF;
+use constant RHASH_BLAKE2S   => 0x20000000;
+use constant RHASH_BLAKE2B   => 0x40000000;
+use constant RHASH_ALL       => 0x7FFFFFFF;
 
 ##############################################################################
 # Rhash class methods
@@ -165,7 +167,7 @@ sub hash_id($)
 }
 
 ##############################################################################
-# Hash formatting functions
+# Message digest formatting functions
 
 # printing constants
 use constant RHPR_DEFAULT   => 0x0;
@@ -236,7 +238,7 @@ sub AUTOLOAD
 sub msg($$)
 {
 	my ($hash_id, $msg) = @_;
-	my $raw = rhash_msg_raw($hash_id, $msg); # get binary hash
+	my $raw = rhash_msg_raw($hash_id, $msg); # get a binary message digest
 	return (is_base32($hash_id) ? raw2base32($raw) : raw2hex($raw));
 }
 
@@ -246,7 +248,7 @@ __END__
 
 =head1 NAME
 
-Crypt::Rhash - Compute hash sums and magnet links
+Crypt::Rhash - Compute message digests and magnet links
 
 =head1 SYNOPSIS
 
@@ -268,18 +270,18 @@ or
 =head1 DESCRIPTION
 
 Crypt::Rhash module is an object-oriented interface to LibRHash library,
-allowing simultaneous calculation of several hash functions for a file  or a
+allowing simultaneous calculation of several hash functions for a file or a
 text message.
 
-Resulting hash digest can be obtained in hexadecimal, BASE32, BASE64, raw
+Calculated message digest can be obtained in hexadecimal, BASE32, BASE64, raw
 binary format or as a magnet link.
 
 =head1 SUPPORTED ALGORITHMS
 
-The module supports the following hashing algorithms:
+The module supports the following hash functions:
 CRC32, CRC32C, MD4, MD5, SHA1, SHA256, SHA512, SHA3, AICH, ED2K, Tiger,
 DC++ TTH, GOST R 34.11-94, GOST R 34.11-2012, BitTorrent BTIH, RIPEMD-160,
-HAS-160, EDON-R 256/512, Whirlpool and Snefru-128/256.
+HAS-160, BLAKE2s/BLAKE2b, EDON-R 256/512, Whirlpool and Snefru-128/256.
 
 =head1 CONSTRUCTOR
 
@@ -319,19 +321,21 @@ Constructor accepts the following constants as arguments:
   RHASH_EDONR512,
   RHASH_SNEFRU128,
   RHASH_SNEFRU256,
+  RHASH_BLAKE2S,
+  RHASH_BLAKE2B,
   RHASH_ALL
 
 The RHASH_ALL bit mask is bitwise union of all listed above bit-flags.
 An object created as Crypt::Rhash->new(RHASH_ALL) calculates all
 supported hash functions for the same data.
 
-=head1 COMPUTING HASHES
+=head1 COMPUTING MESSAGE DIGESTS
 
 =over
 
 =item $rhash->update( $msg )
 
-Calculates hashes of the $msg string.
+Calculates message digests of the $msg string.
 The method can be called repeatedly with chunks of the message to be hashed.
 It returns the $rhash object itself allowing the following construction:
 
@@ -341,20 +345,20 @@ It returns the $rhash object itself allowing the following construction:
 
 =item $rhash->update_fd( $fd, $start, $size )
 
-Calculate a hash of the file (or its part) specified by $file_path or a file descriptor $fd.
+Calculate a message digest of the file (or its part) specified by $file_path or a file descriptor $fd.
 The update_fd method doesn't close the $fd, leaving the file position after the hashed block.
-The optional $start and $size specify the block of the file to hash. If $start is undefined,
-then the size is read from the start. If $size is undefined, then the file is read till the end.
+The optional $start and $size specify the block of the file to process. If $start is undefined,
+then the file is read from the start. If $size is undefined, then the file is read till the end.
 No error is reported if the $size is greater than the number of the unread bytes left in the file.
 
-Returns the number of characters actually read, 0 at end of file,
+Returns the number of characters actually read, 0 at the end of file,
 or undef if there was an error (in the latter case $! is also set).
 
   use Crypt::Rhash;
   my $r = new Crypt::Rhash(RHASH_SHA1);
   open(my $fd, "<", "input.txt") or die "cannot open < input.txt: $!";
   while ((my $n = $r->update_fd($fd, undef, 1024) != 0)) {
-      print "$n bytes hashed. The SHA1 hash is " . $r->final()->hash() . "\n";
+      print "$n bytes hashed. The SHA1 is " . $r->final()->hash() . "\n";
       $r->reset();
   }
   defined($n) or die "read error for input.txt: $!";
@@ -362,9 +366,9 @@ or undef if there was an error (in the latter case $! is also set).
 
 =item $rhash->final()
 
-Finishes calculation for all data buffered by updating methods and stops hash
-calculation. The function is called automatically by any of the
-$rhash->hash*() methods if the final() call was skipped.
+Finishes calculation for all data buffered by updating methods and stops
+message digest calculation.  The function is called automatically by any
+of the $rhash->hash*() methods if the final() call was skipped.
 
 =item $rhash->reset()
 
@@ -380,27 +384,27 @@ Returns the hash mask, the $rhash object was constructed with.
 
 =back
 
-=head1 FORMATTING HASH VALUE
+=head1 FORMATTING MESSAGE DIGEST
 
-Computed hash can be formatted as a hexadecimal string (in the forward or
+Computed message digest can be formatted as a hexadecimal string (in the forward or
 reverse byte order), a base32/base64-encoded string or as raw binary data.
 
 =over
 
 =item $rhash->hash( $hash_id )
 
-Returns the hash string in the default format,
+Returns the message digest in the default format,
 which can be hexadecimal or base32. Actually the method is equivalent of
 
   (Crypt::Rhash::is_base32($hash_id) ? $rhash->hash_base32($hash_id) :
     $rhash->hash_hex($hash_id))
 
-If the optional $hash_id parameter is omitted or zero, then the method returns the hash
-for the algorithm contained in $rhash with the lowest identifier.
+If the optional $hash_id parameter is omitted or zero, then the method returns
+the message digest for the algorithm contained in $rhash with the lowest identifier.
 
 =item $rhash->hash_hex( $hash_id )
 
-Returns the specified hash in the hexadecimal format.
+Returns the specified message digest in the hexadecimal format.
 
   use Crypt::Rhash;
   my $msg = "abc";
@@ -408,23 +412,23 @@ Returns the specified hash in the hexadecimal format.
 
 =item $rhash->hash_rhex( $hash_id )
 
-Returns the specified hash in the hexadecimal format with reversed order of bytes.
-Some programs prefer to output the GOST R 34.11-94 hash in this format.
+Returns the specified message digest in the hexadecimal format with reversed order of bytes.
+Some programs prefer to output the GOST R 34.11-94 message digest in this format.
 
 =item $rhash->hash_base32( $hash_id )
 
-Returns the specified hash in the base32 format.
+Returns the specified message digest in the base32 format.
 
 =item $rhash->hash_base64( $hash_id )
 
-Returns the specified hash in the base64 format.
+Returns the specified message digest in the base64 format.
 
 =item $rhash->magnet_link( $filename, $hash_mask )
 
-Returns the magnet link containing the computed hashes, filesize, and,
-optionaly, $filename. The $filename (if specified) is URL-encoded,
+Returns the magnet link containing the computed message digests, filesize,
+and, optionaly, $filename. The $filename (if specified) is URL-encoded,
 by converting special characters into the %<hexadecimal-code> form.
-The optional parameter $hash_mask can limit which hash values to put
+The optional parameter $hash_mask can limit which message digests to put
 into the link.
 
 =back
@@ -435,7 +439,7 @@ into the link.
 
 =item Crypt::Rhash::count()
 
-Returns the number of supported hash algorithms
+Returns the number of supported hash functions
 
 =item Crypt::Rhash::is_base32($hash_id)
 
@@ -444,25 +448,25 @@ Returns zero if default format is hexadecimal.
 
 =item Crypt::Rhash::get_digest_size($hash_id)
 
-Returns the size in bytes of raw binary hash of the specified hash algorithm.
+Returns the size in bytes of raw binary message digest of the specified hash function.
 
 =item Crypt::Rhash::get_hash_length($hash_id)
 
-Returns the length of a hash string in default output format for the specified hash algorithm.
+Returns the length of a message digest in default output format for the specified hash function.
 
 =item Crypt::Rhash::get_name($hash_id)
 
-Returns the name of the specified hash algorithm.
+Returns the name of the specified hash function.
 
 =back
 
-=head1 ALTERNATIVE WAY TO COMPUTE HASH
+=head1 ALTERNATIVE WAY TO COMPUTE A MESSAGE DIGEST
 
 =over
 
 =item Crypt::Rhash::msg($hash_id, $message)
 
-Computes and returns a single hash (in its default format) of the $message by the selected hash algorithm.
+Computes and returns a single message digest (in its default format) of the $message by the selected hash function.
 
   use Crypt::Rhash;
   print "SHA1( 'abc' ) = " . Crypt::Rhash::msg(RHASH_SHA1, "abc") . "\n";

@@ -110,10 +110,9 @@ char* make_path(const char* dir_path, const char* sub_path, int user_path_separa
  * @param sub_path the filepath to append to the directory
  * @return concatinated file path
  */
-tpath_t make_wpath(ctpath_t dir_path, size_t dir_len, wchar_t* sub_path)
+tpath_t make_wpath(ctpath_t dir_path, size_t dir_len, ctpath_t sub_path)
 {
 	wchar_t* result;
-	wchar_t* long_path;
 	size_t len;
 	if (dir_path == 0 || IS_DOT_TSTR(dir_path))
 		dir_len = 0;
@@ -138,10 +137,24 @@ tpath_t make_wpath(ctpath_t dir_path, size_t dir_len, wchar_t* sub_path)
 	}
 	/* append sub_path */
 	memcpy(result + dir_len, sub_path, (len + 1) * sizeof(wchar_t));
-	long_path = get_long_path_if_needed(result);
+	return result;
+}
+
+/**
+ * Return wide-string filepath, obtained by concatinating a directory path and a sub-path.
+ * Windows UNC path is returned if the resulting path is too long.
+ *
+ * @param dir_path (nullable) directory path
+ * @param sub_path the filepath to append to the directory
+ * @return concatinated file path
+ */
+static tpath_t make_wpath_unc(ctpath_t dir_path, wchar_t* sub_path)
+{
+	wchar_t* path = make_wpath(dir_path, (size_t)-1, sub_path);
+	wchar_t* long_path = get_long_path_if_needed(path);
 	if (!long_path)
-		return result;
-	free(result);
+		return path;
+	free(path);
 	return long_path;
 }
 #endif /* _WIN32 */
@@ -213,29 +226,40 @@ enum FileMemoryModeBits {
  */
 int file_init(file_t* file, ctpath_t path, unsigned init_flags)
 {
+#if _WIN32
+	tpath_t long_path = get_long_path_if_needed(path);
+#endif
 	memset(file, 0, sizeof(*file));
 	if (path[0] == RSH_T('.') && IS_ANY_TSLASH(path[1]))
 		path += 2;
+	file->real_path = (tpath_t)path;
+	file->mode = (init_flags & FileMaskModeBits) | FileDontFreeRealPath;
+	if (((init_flags & FileMaskUpdatePrintPath) && opt.path_separator) IF_WINDOWS( || long_path))
+	{
+		/* initialize print_path using the path argument */
+		if (!file_get_print_path(file, FPathUtf8 | (init_flags & FileMaskUpdatePrintPath)))
+		{
+			IF_WINDOWS(free(long_path));
+			return -1;
+		}
+	}
 #if _WIN32
-	file->real_path = get_long_path_if_needed(path);
-	if (file->real_path)
+	if (long_path)
+	{
+		file->real_path = long_path;
 		file->mode = init_flags & FileMaskModeBits;
+	}
 	else
 #endif
 	{
-		if ((init_flags & FileInitReusePath) != 0) {
-			file->real_path = (tpath_t)path;
-			file->mode = (init_flags & FileMaskModeBits) | FileDontFreeRealPath;
-		} else {
+		if ((init_flags & FileInitReusePath) == 0)
+		{
 			file->real_path = rsh_tstrdup(path);
 			file->mode = init_flags & FileMaskModeBits;
 		}
 	}
 	if ((init_flags & (FileInitRunFstat | FileInitRunLstat)) &&
 			file_stat(file, (init_flags & FileInitRunLstat)) < 0)
-		return -1;
-	if ((init_flags & FileInitUpdatePrintPathLastSlash) && opt.path_separator == ALIEN_PATH_SEPARATOR &&
-			!file_get_print_path(file, FPathUtf8 | FileInitUpdatePrintPathLastSlash))
 		return -1;
 	return 0;
 }
@@ -279,7 +303,7 @@ static int detect_path_encoding(file_t* file, wchar_t* dir_path, const char* pri
 			return primary_path_index;
 		}
 		if (dir_path) {
-			file->real_path = make_wpath(dir_path, (size_t)-1, path);
+			file->real_path = make_wpath_unc(dir_path, path);
 			free(path);
 		} else
 			file->real_path = path;
@@ -342,7 +366,7 @@ int file_init_by_print_path(file_t* file, file_t* prepend_dir, const char* print
 		} else {
 			primary_path = &file->native_path;
 		}
-		if ((init_flags & (FileInitReusePath | FileInitUpdatePrintPathLastSlash)) == FileInitReusePath) {
+		if ((init_flags & (FileInitReusePath | FileMaskUpdatePrintPath)) == FileInitReusePath) {
 			*primary_path = print_path;
 			file->mode |= (encoding == 0 ? FileDontFreePrintPath : FileDontFreeNativePath);
 		} else {
@@ -357,15 +381,15 @@ int file_init_by_print_path(file_t* file, file_t* prepend_dir, const char* print
 		file->mode = init_flags & FileMaskModeBits;
 	}
 	assert(file->print_path == NULL);
-	if ((init_flags & (FileInitReusePath | FileInitUpdatePrintPathLastSlash)) == FileInitReusePath) {
+	if ((init_flags & (FileInitReusePath | FileMaskUpdatePrintPath)) == FileInitReusePath) {
 		file->print_path = print_path;
 		file->mode |= FileDontFreePrintPath;
 	} else {
 		file->print_path = rsh_strdup(print_path);
 	}
 #endif
-	/* note: flag FileInitUpdatePrintPathLastSlash is used only with file_init() */
-	assert((init_flags & FileInitUpdatePrintPathLastSlash) == 0);
+	/* note: FileMaskUpdatePrintPath flags are used only with file_init() */
+	assert((init_flags & FileMaskUpdatePrintPath) == 0);
 	if ((init_flags & (FileInitRunFstat | FileInitRunLstat)) &&
 			file_stat(file, (init_flags & FileInitRunLstat)) < 0)
 		return -1;
@@ -376,18 +400,22 @@ int file_init_by_print_path(file_t* file, file_t* prepend_dir, const char* print
  * Transform the given file path, according to passed flags.
  *
  * @param path the file path to transform
- * @param flags bitmask containing FPathBaseName, FPathNotNull and FileInitUpdatePrintPathLastSlash bit flags
+ * @param flags bitmask containing FPathBaseName, FPathNotNull and FileMaskUpdatePrintPath bit flags
  * @return transformed path
  */
 static const char* handle_rest_of_path_flags(const char* path, unsigned flags)
 {
 	if (path == NULL)
 		return ((flags & FPathNotNull) ? (errno == EINVAL ? "(null)" : "(encoding error)") : NULL);
-	if ((flags & FileInitUpdatePrintPathLastSlash) != 0 && opt.path_separator) {
+	if ((flags & FileMaskUpdatePrintPath) != 0 && opt.path_separator) {
 		char* p = (char*)path - 1 + strlen(path);
-		for (; p >= path && !IS_ANY_SLASH(*p); p--);
-		if (p >= path)
-			*p = opt.path_separator;
+		for (; p >= path; p--) {
+			if (IS_ANY_SLASH(*p)) {
+				*p = opt.path_separator;
+				if ((flags & FileInitUpdatePrintPathLastSlash) != 0)
+					break;
+			}
+		}
 	}
 	return (flags & FPathBaseName ? get_basename(path) : path);
 }
@@ -399,7 +427,7 @@ static const char* handle_rest_of_path_flags(const char* path, unsigned flags)
  *
  * @param file the file to get the path
  * @param flags bitmask containing FPathUtf8, FPathNative, FPathBaseName, FPathNotNull
- *              and FileInitUpdatePrintPathLastSlash bit flags
+ *              and FileMaskUpdatePrintPath bit flags
  * @return transformed print path of the file. If FPathNotNull flag is not specified,
  *         then NULL is returned on function fail with error code stored in errno.
  *         If FPathNotNull flag is set, then error code is transformed to returned string.
@@ -451,7 +479,7 @@ const char* file_get_print_path(file_t* file, unsigned flags)
 #else
 	if (!file->print_path && !file->real_path)
 		errno = EINVAL;
-	if (!file->print_path && (flags & FileInitUpdatePrintPathLastSlash))
+	if (!file->print_path && (flags & FileMaskUpdatePrintPath))
 		file->print_path = rsh_strdup(file->real_path);
 	return handle_rest_of_path_flags((file->print_path ? file->print_path : file->real_path), flags);
 #endif
@@ -884,7 +912,7 @@ int file_list_read(file_list_t* list)
 		if (*line == '\0')
 			continue; /* skip empty lines */
 		file_init_by_print_path(&list->current_file, NULL, line,
-			(list->state & FileInitUtf8PrintPath));
+			(list->state & FileInitUtf8PrintPath) | FileInitRunFstat);
 		return 1;
 	}
 	return 0;
@@ -968,7 +996,7 @@ WIN_DIR* win_wopendir(const wchar_t* dir_path)
 	WIN_DIR* d;
 
 	/* append '\*' to the dir_path */
-	wchar_t* real_path = make_wpath(dir_path, (size_t)-1, L"*");
+	wchar_t* real_path = make_wpath_unc(dir_path, L"*");
 	d = (WIN_DIR*)rsh_malloc(sizeof(WIN_DIR));
 
 	d->hFind = FindFirstFileW(real_path, &d->findFileData);

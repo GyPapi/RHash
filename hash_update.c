@@ -67,7 +67,8 @@ struct update_ctx* update_ctx_new(file_t* update_file)
 }
 
 /**
- * Add hash of the specified file to the updated hash file, it the first file is not yet present in the second.
+ * Add message digests of the specified file to the updated hash file,
+ * if the path of the first file is not yet present in the second.
  * In a case of fail, the error will be logged.
  *
  * @param ctx the update context for updated hash file
@@ -91,7 +92,7 @@ int update_ctx_update(struct update_ctx* ctx, file_t* file)
 		return -2;
 	}
 
-	/* print hash sums to the hash file */
+	/* print message digests to the hash file */
 	res = calculate_and_print_sums(ctx->fd, &ctx->file, file);
 	if (res < 0)
 		ctx->flags |= ErrorOcurred;
@@ -175,7 +176,7 @@ static int open_and_prepare_hash_file(struct update_ctx* ctx)
  * In a case of fail, the error will be logged.
  *
  * @param set the file set to store loaded files
- * @param file the file containing hash sums to load
+ * @param file the file containing message digests to load
  * @return bit-mask containg UpdateFlagsBits on success, -1 on fail
  */
 static int file_set_load_from_crc_file(file_set* set, file_t* file)
@@ -215,7 +216,7 @@ static int file_set_load_from_crc_file(file_set* set, file_t* file)
 		if (IS_COMMENT(*line) || *line == '\r' || *line == '\n')
 			continue;
 		/* parse a hash file line */
-		if (hash_check_parse_line(line, &hc, !feof(fd))) {
+		if (hash_check_parse_line(line, &hc, opt.sum_flags, !feof(fd))) {
 			/* put file path into the file set */
 			if (hc.file_path) file_set_add_name(set, hc.file_path);
 		}

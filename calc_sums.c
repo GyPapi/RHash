@@ -1,9 +1,8 @@
-/* calc_sums.c - hash calculating and printing functions */
+/* calc_sums.c - message digests calculating and printing functions */
 
 #include "calc_sums.h"
 #include "hash_print.h"
 #include "output.h"
-#include "platform.h" /* unlink() on unix */
 #include "parse_cmdline.h"
 #include "rhash_main.h"
 #include "win_utils.h"
@@ -52,7 +51,7 @@ static void init_btih_data(struct file_info* info)
 }
 
 /**
- * (Re)-initialize RHash context, to calculate hash sums.
+ * (Re)-initialize RHash context, to calculate message digests.
  *
  * @param info the file data
  */
@@ -60,7 +59,7 @@ static void re_init_rhash_context(struct file_info* info)
 {
 	if (rhash_data.rctx != 0) {
 		if (opt.mode & (MODE_CHECK | MODE_CHECK_EMBEDDED)) {
-			/* a set of hash sums can change from file to file */
+			/* a set of hash algorithms can change from file to file */
 			rhash_free(rhash_data.rctx);
 			rhash_data.rctx = 0;
 		} else {
@@ -88,13 +87,13 @@ static void re_init_rhash_context(struct file_info* info)
 }
 
 /**
- * Calculate hash sums simultaneously, according to the info->sums_flags.
- * Calculated hashes are stored in info->rctx.
+ * Calculate message digests simultaneously, according to the info->sums_flags.
+ * Calculated message digests are stored in info->rctx.
  *
  * @param info file data
  * @return 0 on success, -1 on fail with error code stored in errno
  */
-static int calc_sums(struct file_info* info)
+int calc_sums(struct file_info* info)
 {
 	FILE* fd = 0;
 	int res;
@@ -154,13 +153,13 @@ static int calc_sums(struct file_info* info)
 /* functions to calculate and print file sums */
 
 /**
- * Search for a crc32 hash sum in the given file name.
+ * Search for a crc32 checksum in the given file name.
  *
  * @param file the file, which filename is checked.
- * @param crc32 pointer to integer to receive parsed hash sum.
+ * @param crc32 pointer to integer to receive parsed checksum.
  * @return non zero if crc32 was found, zero otherwise.
  */
-static int find_embedded_crc32(file_t* file, unsigned* crc32)
+int find_embedded_crc32(file_t* file, unsigned* crc32)
 {
 	const char* filepath = file_get_print_path(file, FPathUtf8 | FPathNotNull);
 	const char* e = filepath + strlen(filepath) - 10;
@@ -246,7 +245,7 @@ int rename_file_by_embeding_crc32(struct file_info* info)
  * @param rctx the context containing torrent data
  * @return 0 on success, -1 on fail
  */
-int save_torrent_to(file_t* torrent_file, rhash_context* rctx)
+int save_torrent_to(file_t* torrent_file, struct rhash_context* rctx)
 {
 	FILE* fd;
 	int res = 0;
@@ -296,7 +295,7 @@ static int save_torrent(struct file_info* info)
 }
 
 /**
- * Calculate and print file hash sums using printf format.
+ * Calculate and print file message digests using printf format.
  * In a case of fail, the error will be logged.
  *
  * @param out the output stream to print results to
@@ -381,233 +380,6 @@ int calculate_and_print_sums(FILE* out, file_t* out_file, file_t* file)
 			print_file_time_stats(&info);
 		}
 	}
-	return res;
-}
-
-/**
- * Verify hash sums of the file.
- * In a case of fail, the error will be logged.
- *
- * @param info structure file path to process
- * @return 0 on success, 1 on hash sums mismatch,
- *     -1/-2 on input/output error
- */
-static int verify_sums(struct file_info* info)
-{
-	timedelta_t timer;
-	int res = 0;
-
-	/* initialize percents output */
-	if (init_percents(info) < 0) {
-		log_error_file_t(&rhash_data.out_file);
-		return -2;
-	}
-	rsh_timer_start(&timer);
-
-	if (FILE_ISBAD(info->file) || calc_sums(info) < 0) {
-		return (finish_percents(info, -1) < 0 ? -2 : -1);
-	}
-	info->time = rsh_timer_stop(&timer);
-
-	if (rhash_data.stop_flags) {
-		report_interrupted();
-		return 0;
-	}
-
-	if ((opt.flags & OPT_EMBED_CRC) &&
-			find_embedded_crc32(info->file, &info->hc.embedded_crc32)) {
-		info->hc.flags |= HC_HAS_EMBCRC32;
-		assert(info->hc.hash_mask & RHASH_CRC32);
-	}
-
-	if (!do_hash_sums_match(&info->hc, info->rctx))
-		res = 1;
-
-	if (finish_percents(info, res) < 0)
-		res = -2;
-
-	if ((opt.flags & OPT_SPEED) && info->sums_flags) {
-		print_file_time_stats(info);
-	}
-	return res;
-}
-
-/**
- * Check hash sums in a hash file.
- * Lines beginning with ';' and '#' are ignored.
- * In a case of fail, the error will be logged.
- *
- * @param file the file containing hash sums to verify.
- * @param chdir true if function should emulate chdir to directory of filepath before checking it.
- * @return 0 on success, -1 on input error, -2 on results output error
- */
-int check_hash_file(file_t* file, int chdir)
-{
-	FILE* fd;
-	file_t parent_dir;
-	file_t* p_parent_dir = 0;
-	char buf[4096];
-	timedelta_t timer;
-	struct file_info info;
-	int res = 0;
-	int line_num = 0;
-	unsigned init_flags = 0;
-	double time;
-
-	/* process --check-embedded option */
-	if (opt.mode & MODE_CHECK_EMBEDDED) {
-		unsigned crc32;
-		if (find_embedded_crc32(file, &crc32)) {
-			/* initialize file_info structure */
-			memset(&info, 0, sizeof(info));
-			info.file = file;
-			info.sums_flags = info.hc.hash_mask = RHASH_CRC32;
-			info.hc.flags = HC_HAS_EMBCRC32;
-			info.hc.embedded_crc32 = crc32;
-
-			res = verify_sums(&info);
-			if (res >= -1 && fflush(rhash_data.out) < 0) {
-				log_error_file_t(&rhash_data.out_file);
-				res = -2;
-			} else if (!rhash_data.stop_flags) {
-				if (res >= 0)
-					rhash_data.ok++;
-				else if (res == -1 && errno == ENOENT)
-					rhash_data.miss++;
-				rhash_data.processed++;
-			}
-		} else {
-			/* TRANSLATORS: sample filename with embedded CRC32: file_[A1B2C3D4].mkv */
-			log_warning_msg_file_t(_("file name doesn't contain a CRC32: %s\n"), file);
-			return -1;
-		}
-		return res;
-	}
-
-	/* initialize statistics */
-	rhash_data.processed = rhash_data.ok = rhash_data.miss = 0;
-	rhash_data.total_size = 0;
-
-	/* open file / prepare file descriptor */
-	if (FILE_ISSTDIN(file)) {
-		fd = stdin;
-	} else if ( !(fd = file_fopen(file, FOpenRead | FOpenBin) )) {
-		log_error_file_t(file);
-		return -1;
-	}
-
-	{
-		int count = fprintf_file_t(rhash_data.out, _("\n--( Verifying %s )"), file, OutCountSymbols);
-		int tail_dash_len = (0 < count && count < 81 ? 81 - count : 2);
-		rsh_fprintf(rhash_data.out, "%s\n", str_set(buf, '-', tail_dash_len));
-		if (ferror(rhash_data.out) || fflush(rhash_data.out) < 0) {
-			log_error_file_t(&rhash_data.out_file);
-			if (fd != stdin)
-				fclose(fd);
-			return -2;
-		}
-	}
-	rsh_timer_start(&timer);
-	memset(&parent_dir, 0, sizeof(parent_dir));
-
-	/* mark the directory part of the path, by setting the pos index */
-	if (chdir) {
-		file_modify_path(&parent_dir, file, NULL, FModifyGetParentDir);
-		p_parent_dir = &parent_dir;
-	}
-
-	/* read hash file line by line */
-	for (line_num = 0; fgets(buf, sizeof(buf), fd); line_num++) {
-		char* line = buf;
-		file_t file_to_check;
-
-		/* skip unicode BOM */
-		if (STARTS_WITH_UTF8_BOM(buf)) {
-			line += 3;
-			if (line_num == 0)
-				init_flags = FileInitUtf8PrintPath; /* hash file is in UTF8 */
-		}
-
-		if (*line == 0)
-			continue; /* skip empty lines */
-
-		if (is_binary_string(line)) {
-			log_error_msg_file_t(_("file is binary: %s\n"), file);
-			if (fd != stdin)
-				fclose(fd);
-			file_cleanup(&parent_dir);
-			return -1;
-		}
-
-		/* skip comments and empty lines */
-		if (IS_COMMENT(*line) || *line == '\r' || *line == '\n')
-			continue;
-
-		memset(&info, 0, sizeof(info));
-
-		if (!hash_check_parse_line(line, &info.hc, !feof(fd)))
-			continue;
-		if (info.hc.hash_mask == 0)
-			continue;
-
-		/* check if hash file contains a hash sum without a filename */
-		if (info.hc.file_path != NULL) {
-			int is_absolute = IS_PATH_SEPARATOR(info.hc.file_path[0]);
-			IF_WINDOWS(is_absolute = is_absolute || (info.hc.file_path[0] && info.hc.file_path[1] == ':'));
-			file_init_by_print_path(&file_to_check, (is_absolute ? NULL : p_parent_dir), info.hc.file_path, init_flags);
-		} else {
-			if (file_modify_path(&file_to_check, file, NULL, FModifyRemoveExtension) < 0) {
-				/* note: trailing whitespaces were removed from line by hash_check_parse_line() */
-				log_error(_("%s: can't parse line \"%s\"\n"), file_get_print_path(file, FPathPrimaryEncoding | FPathNotNull), line);
-				continue;
-			}
-		}
-
-		info.file = &file_to_check;
-		info.sums_flags = info.hc.hash_mask;
-		file_stat(&file_to_check, 0);
-
-		/* verify hash sums of the file */
-		res = verify_sums(&info);
-
-		if (res >= -1 && fflush(rhash_data.out) < 0) {
-			log_error_file_t(&rhash_data.out_file);
-			res = -2;
-		}
-		file_cleanup(&file_to_check);
-
-		if (rhash_data.stop_flags || res < -1) {
-			break; /* stop on fatal error */
-		}
-
-		/* update statistics */
-		if (res == 0)
-			rhash_data.ok++;
-		else if (res == -1 && errno == ENOENT)
-			rhash_data.miss++;
-		rhash_data.processed++;
-	}
-	file_cleanup(&parent_dir);
-	time = rsh_timer_stop(&timer);
-
-	if (res >= -1 && (rsh_fprintf(rhash_data.out, "%s\n", str_set(buf, '-', 80)) < 0 ||
-			print_check_stats() < 0)) {
-		log_error_file_t(&rhash_data.out_file);
-		res = -2;
-	}
-
-	if (rhash_data.processed != rhash_data.ok)
-		rhash_data.non_fatal_error = 1;
-
-	if ((opt.flags & OPT_SPEED) && rhash_data.processed > 1)
-		print_time_stats(time, rhash_data.total_size, 1);
-
-	rhash_data.processed = 0;
-	/* check for input errors */
-	if (res >= 0 && ferror(fd))
-		res = -1;
-	if (fd != stdin)
-		fclose(fd);
 	return res;
 }
 
@@ -696,7 +468,7 @@ void run_benchmark(unsigned hash_id, unsigned flags)
 	sz_mb = msg_size / (1 << 20); /* size in MiB */
 	hash_name = rhash_get_name(hash_id);
 	if (!hash_name)
-		hash_name = ""; /* benchmarking several hashes*/
+		hash_name = ""; /* benchmarking several hash functions */
 
 	for (i = 0; i < (int)sizeof(message); i++)
 		message[i] = i & 0xff;

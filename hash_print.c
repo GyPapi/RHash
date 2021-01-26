@@ -1,4 +1,4 @@
-/* hash_print.c - output hash sums using printf-like format */
+/* hash_print.c - output message digests using printf-like format */
 
 #include "hash_print.h"
 #include "calc_sums.h"
@@ -322,7 +322,7 @@ print_item* parse_percent_item(const char** str)
  * @param out the stream where to print url to
  * @param filename the file name
  * @param filesize the file size
- * @param sums the file hash sums
+ * @param sums the file message digests
  * @return 0 on success, -1 on fail with error code stored in errno
  */
 static int fprint_ed2k_url(FILE* out, struct file_info* info, int print_type)
@@ -420,7 +420,7 @@ int print_line(FILE* out, unsigned out_mode, print_item* list, struct file_info*
 	int res = 0;
 	unsigned out_flags = (out_mode & FileContentIsUtf8 ? OutForceUtf8 : 0);
 #ifdef _WIN32
-	/* switch to binary mode to correctly output binary hashes */
+	/* switch to binary mode to correctly output binary message digests */
 	int out_fd = _fileno(out);
 	int old_mode = (out_fd > 0 && !isatty(out_fd) ? _setmode(out_fd, _O_BINARY) : -1);
 #endif
@@ -513,15 +513,46 @@ void free_print_list(print_item* list)
  * Initialization of internal data
  *=========================================================================*/
 
+#define VNUM(v, index) (((unsigned)v >> (24 - index * 8)) & 0xff)
+
 /**
- * Initialize information about hashes, stored in the
+ * Get text representation of librhash version.
+ */
+static const char* get_librhash_version(void)
+{
+	static char buf[20];
+	rhash_uptr_t v = rhash_get_version();
+	if (v == RHASH_ERROR) {
+		/* test for version-specific librhash features */
+		int algorithm_count = rhash_count();
+		if (rhash_transmit(14, NULL, 0, 0) != RHASH_ERROR)
+			v = 0x01040000;
+		else if (rhash_print(NULL, NULL, RHASH_CRC32, (RHPR_RAW | RHPR_URLENCODE)) != 4)
+			v = 0x01030900;
+		else if (algorithm_count == 29)
+			v = 0x01030800;
+		else if (algorithm_count == 27)
+			v = 0x01030700;
+		else if (rhash_get_openssl_supported_mask() != RHASH_ERROR)
+			v = 0x01030600;
+		else if (algorithm_count == 26)
+			return "1.3.[0-5]";
+		else
+			return "1.2.*";
+	}
+	sprintf(buf, "%d.%d.%d", VNUM(v, 0), VNUM(v, 1), VNUM(v, 2));
+	return buf;
+}
+
+/**
+ * Initialize information about message digests, stored in the
  * hash_info_table global variable.
  */
 void init_hash_info_table(void)
 {
 	unsigned bit;
 	const unsigned fullmask = RHASH_ALL_HASHES | OPT_ED2K_LINK;
-	const unsigned custom_bsd_name = RHASH_RIPEMD160 |
+	const unsigned custom_bsd_name = RHASH_RIPEMD160 | RHASH_BLAKE2S | RHASH_BLAKE2B |
 		RHASH_SHA224 | RHASH_SHA256 | RHASH_SHA384 | RHASH_SHA512;
 	const unsigned short_opt_mask = RHASH_CRC32 | RHASH_MD5 | RHASH_SHA1 | RHASH_TTH | RHASH_ED2K |
 		RHASH_AICH | RHASH_WHIRLPOOL | RHASH_RIPEMD160 | RHASH_GOST12_256 | OPT_ED2K_LINK;
@@ -530,15 +561,12 @@ void init_hash_info_table(void)
 
 	/* prevent crash on incompatible librhash */
 	if (rhash_count() < RHASH_HASH_COUNT) {
-		rsh_fprintf(stderr, "fatal error: incompatible librhash version\n");
+		rsh_fprintf(stderr, "fatal error: incompatible librhash version is loaded: %s\n", get_librhash_version());
 		rsh_exit(2);
-	}
+	} else if (RHASH_HASH_COUNT != rhash_count())
+		log_warning("inconsistent librhash version is loaded: %s\n", get_librhash_version());
 
 	memset(hash_info_table, 0, sizeof(hash_info_table));
-	/* check consistency with librhash */
-	if (RHASH_HASH_COUNT != rhash_count())
-		log_warning("old, incompatible version of librhash is loaded\n");
-
 	for (bit = 1; bit && bit <= fullmask; bit = bit << 1) {
 		const char* p;
 		char* e;
@@ -588,6 +616,12 @@ void init_hash_info_table(void)
 				case RHASH_SHA512:
 					info->bsd_name = "SHA512";
 					break;
+				case RHASH_BLAKE2S:
+					info->bsd_name = "BLAKE2s";
+					break;
+				case RHASH_BLAKE2B:
+					info->bsd_name = "BLAKE2b";
+					break;
 			}
 		} else
 			info->bsd_name = info->name;
@@ -613,7 +647,7 @@ void init_printf_format(strbuf_t* out)
 	char fmt_modifier = 'b';
 
 	if (!opt.fmt) {
-		/* print SFV header for CRC32 or if no hash sums options specified */
+		/* print SFV header for CRC32 or if no hash functions options has been specified */
 		opt.fmt = (opt.sum_flags == RHASH_CRC32 || !opt.sum_flags ? FMT_SFV : FMT_SIMPLE);
 	}
 	uppercase = ((opt.flags & OPT_UPPERCASE) ||
@@ -651,7 +685,7 @@ void init_printf_format(strbuf_t* out)
 		fmt_modifier = (opt.flags & OPT_HEX ? 'x' : opt.flags & OPT_BASE32 ? 'b' : 'B');
 	}
 
-	/* loop by hashes */
+	/* loop by message digests */
 	for (bit = 1 << index; bit && bit <= opt.sum_flags; bit = bit << 1, index++) {
 		const char* p;
 		print_hash_info* info;
